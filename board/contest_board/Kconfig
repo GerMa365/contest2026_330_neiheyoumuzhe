@@ -3,6 +3,48 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+# SILICONLOOP: 原条件为 ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD（Apache 板名），
+# 本项目使用 ARCH_BOARD_CUSTOM，该条件永不成立，故改为 ARCH_CHIP_ESP32P4。
+# 以下选项搬自 Apache NuttX boards/risc-v/esp32p4/common/Kconfig，
+# openvela 的 vendor/openvela/boards/common 未提供板级 Kconfig。
 
-endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+if ARCH_CHIP_ESP32P4
+
+config ESPRESSIF_SPIFLASH_AUTO_BRINGUP
+	bool "Automatic mount of SPI Flash MTD"
+	default y
+	depends on ESPRESSIF_MTD
+	---help---
+		Auto bring-up the SPI Flash MTD on board bring-up.
+		If not selected, the MTD will be registered as a device node on /dev.
+
+choice ESPRESSIF_SPIFLASH_FS
+	prompt "File system to mount on SPI Flash MTD"
+	default ESPRESSIF_SPIFLASH_SMARTFS
+	depends on ESPRESSIF_SPIFLASH_AUTO_BRINGUP
+	optional
+	---help---
+		Mount the SPI Flash MTD with the selected File System format on board
+		bring-up.
+		If not selected, the MTD will be registered as a device node on /dev.
+
+config ESPRESSIF_SPIFLASH_SMARTFS
+	bool "SmartFS"
+	select FS_SMARTFS
+	select MTD_SMART
+
+config ESPRESSIF_SPIFLASH_LITTLEFS
+	bool "LittleFS"
+	select FS_LITTLEFS
+
+config ESPRESSIF_SPIFLASH_MTD_CONFIG
+	bool "Non-volatile storage"
+
+endchoice # ESPRESSIF_SPIFLASH_FS
+
+config ESPRESSIF_SPIFLASH_FS_MOUNT_PT
+	string "File-system Mount Point"
+	depends on ESPRESSIF_SPIFLASH_SMARTFS || ESPRESSIF_SPIFLASH_LITTLEFS
+	default "/data"
+
+endif # ARCH_CHIP_ESP32P4

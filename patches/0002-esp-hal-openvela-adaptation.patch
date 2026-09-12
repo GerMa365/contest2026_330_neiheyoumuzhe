@@ -1,0 +1,56 @@
+diff --git a/components/hal/mmu_hal.c b/components/hal/mmu_hal.c
+index 95441f7463e..5bd051e0030 100644
+--- a/components/hal/mmu_hal.c
++++ b/components/hal/mmu_hal.c
+@@ -41,7 +41,8 @@ void mmu_hal_unmap_all(void)
+ {
+ #if SOC_MMU_PER_EXT_MEM_TARGET
+     mmu_ll_unmap_all(MMU_LL_FLASH_MMU_ID);
+-    mmu_ll_unmap_all(MMU_LL_PSRAM_MMU_ID);
++    /* SILICONLOOP EXPERIMENT: PSRAM MSPI 控制器未初始化时写其 MMU 寄存器会触发 PMP fault */
++    /* mmu_ll_unmap_all(MMU_LL_PSRAM_MMU_ID); */
+ #else
+     for (int i = 0; i < s_ctx.core_nums; i++) {
+         mmu_ll_unmap_all(i);
+diff --git a/nuttx/src/platform/os.c b/nuttx/src/platform/os.c
+index 99470d7e7c0..f82ab26a965 100644
+--- a/nuttx/src/platform/os.c
++++ b/nuttx/src/platform/os.c
+@@ -16,6 +16,8 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <stdio.h>
++#include <spawn.h>
++#include <fcntl.h>
+ #include <clock/clock.h>
+ 
+ #include <nuttx/config.h>
+@@ -1311,6 +1313,7 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+   FAR struct task_wrapper_args_s *wrapper_args;
+   FAR char *argv[2];
+   char ptr_buf[32];
++  posix_spawnattr_t spawn_attr;
+   int ret;
+ 
+   wrapper_args = kmm_zalloc(sizeof(struct task_wrapper_args_s));
+@@ -1335,9 +1338,17 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+ 
+   tcb->flags = TCB_FLAG_TTYPE_KERNEL | TCB_FLAG_FREE_TCB;
+ 
+-  ret = nxtask_init(tcb, name, priority,
+-                    NULL, stack_size,
+-                    task_wrapper_entry, argv, NULL, NULL);
++  /* SILICONLOOP: openvela 内核的 nxtask_init 为 6 参数版本，
++   * 优先级与栈大小需经 posix_spawnattr_t 传递。
++   */
++
++  posix_spawnattr_init(&spawn_attr);
++  posix_spawnattr_setstacksize(&spawn_attr, (size_t)stack_size);
++  posix_spawnattr_setpriority(&spawn_attr, priority);
++
++  ret = nxtask_init(tcb, name, task_wrapper_entry,
++                    NULL, &spawn_attr, argv, NULL);
++  posix_spawnattr_destroy(&spawn_attr);
+   if (ret < 0)
+     {
+       kmm_free(wrapper_args);

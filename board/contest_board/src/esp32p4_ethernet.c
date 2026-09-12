@@ -53,6 +53,17 @@
  *
  ****************************************************************************/
 
+/* SILICONLOOP: 板级源码的 -I 路径不含 HAL 的 esp_timer 头文件目录，
+ * 此处直接声明原型，避免引入整套包含路径。
+ * 原型见 components/esp_timer/include/esp_timer.h:114
+ */
+
+extern int esp_timer_init(void);
+
+volatile int g_sl_hrtimer_ret = 0xdead;
+volatile int g_sl_esptimer_ret = 0xdead;
+volatile int g_sl_espemac_ret = 0xdead;
+
 int board_emac_init(void)
 {
   int ret;
@@ -61,14 +72,40 @@ int board_emac_init(void)
    * subsystem is initialised before creating the driver.
    */
 
+  /* SILICONLOOP: 埋点，区分两个初始化步骤各自的返回值 */
+
+  /* SILICONLOOP: openvela 内核依赖 hr_timer，必须初始化。
+   * 与其冲突的 HAL esp_timer 已改用 alarm 1 + TARGET1（见 HAL 补丁）。
+   */
+
   ret = esp_hr_timer_init();
+  g_sl_hrtimer_ret = ret;
   if (ret < 0)
     {
       nerr("ERROR: esp_hr_timer_init failed: %d\n", ret);
       return ret;
     }
 
+
+  /* SILICONLOOP: openvela 的 esp_hr_timer_init() 只初始化 NuttX 自己的
+   * SYSTIMER 封装，与 Apache NuttX 中同名函数（位于 esp_timer_adapter.c，
+   * 内部调用 esp_timer_init()）行为不同。esp_eth_driver_install() 依赖
+   * ESP-IDF 的 esp_timer 子系统，故此处显式初始化，否则
+   * esp_timer_create() 返回 ESP_ERR_INVALID_STATE (0x103)。
+   */
+
+  {
+    int terr = esp_timer_init();
+    g_sl_esptimer_ret = terr;
+    if (terr != 0 && terr != 0x103)
+      {
+        nerr("ERROR: esp_timer_init failed: %d\n", terr);
+        return -EIO;
+      }
+  }
+
   ret = esp_emac_init();
+  g_sl_espemac_ret = ret;
   if (ret < 0)
     {
       nerr("ERROR: esp_emac_init failed: %d\n", ret);

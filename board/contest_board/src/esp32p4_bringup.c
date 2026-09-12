@@ -160,6 +160,14 @@
  *
  ****************************************************************************/
 
+/* SILICONLOOP: 启动埋点。串口早期日志不可见，改用全局变量记录进度，
+ * 启动后可用 nsh 的 xd 命令或 GDB 读取。
+ */
+
+volatile int g_sl_stage = 0;
+volatile int g_sl_spiflash_ret = 0xdead;
+volatile int g_sl_emac_ret = 0xdead;
+
 int esp_bringup(void)
 {
   int ret = OK;
@@ -313,7 +321,10 @@ int esp_bringup(void)
 #endif /* CONFIG_ESPRESSIF_SPI */
 
 #ifdef CONFIG_ESPRESSIF_SPIFLASH
+  g_sl_stage = 100;
   ret = board_spiflash_init();
+  g_sl_spiflash_ret = ret;
+  g_sl_stage = 101;
   if (ret)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
@@ -507,7 +518,10 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESPRESSIF_EMAC
+  g_sl_stage = 200;
   ret = board_emac_init();
+  g_sl_emac_ret = ret;
+  g_sl_stage = 201;
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: board_emac_init failed: %d\n", ret);

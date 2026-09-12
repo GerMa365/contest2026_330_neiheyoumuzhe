@@ -126,7 +126,7 @@ index 0d2a859f671..51c61253bac 100644
  CMN_CSRCS += riscv_cpuidlestack.c riscv_doirq.c riscv_exit.c riscv_exception.c
  CMN_CSRCS += riscv_getnewintctx.c riscv_getintstack.c riscv_initialstate.c
 diff --git a/arch/risc-v/src/common/espressif/Kconfig b/arch/risc-v/src/common/espressif/Kconfig
-index 2e432d08143..7db147a59f5 100644
+index 2e432d08143..b2cfe06bc17 100644
 --- a/arch/risc-v/src/common/espressif/Kconfig
 +++ b/arch/risc-v/src/common/espressif/Kconfig
 @@ -3,7 +3,7 @@
@@ -287,7 +287,25 @@ index 2e432d08143..7db147a59f5 100644
  menu "Bootloader and Image Configuration"
  
  config ESPRESSIF_SIMPLE_BOOT
-@@ -1019,18 +1105,22 @@ config ESPRESSIF_UART0_TXPIN
+@@ -398,6 +484,17 @@ config ESPRESSIF_HR_TIMER
+ 		The HR Timer is built on top of the System Timer (SYSTIMER) peripheral.
+ 		Timer callbacks are dispatched from a high-priority kernel task.
+ 
++config ESPRESSIF_EMAC
++	bool "Ethernet MAC"
++	depends on ARCH_CHIP_ESP32P4
++	default n
++	select NET
++	select ARCH_PHY_INTERRUPT
++	select ESPRESSIF_HR_TIMER
++	select SCHED_LPWORK
++	---help---
++		Enable Ethernet MAC support.
++
+ config ESPRESSIF_WDT
+ 	bool
+ 	default n
+@@ -1019,18 +1116,22 @@ config ESPRESSIF_UART0_TXPIN
  	default 21 if ESPRESSIF_ESP32C3
  	default 16 if ESPRESSIF_ESP32C6
  	default 24 if ESPRESSIF_ESP32H2
@@ -310,7 +328,7 @@ index 2e432d08143..7db147a59f5 100644
  
  config ESPRESSIF_UART0_RTSPIN
  	int "UART0 RTS Pin"
-@@ -1041,6 +1131,7 @@ config ESPRESSIF_UART0_RTSPIN
+@@ -1041,6 +1142,7 @@ config ESPRESSIF_UART0_RTSPIN
  	range 0 21 if ESPRESSIF_ESP32C3
  	range 0 30 if ESPRESSIF_ESP32C6
  	range 0 27 if ESPRESSIF_ESP32H2
@@ -318,7 +336,7 @@ index 2e432d08143..7db147a59f5 100644
  
  config ESPRESSIF_UART0_CTSPIN
  	int "UART0 CTS Pin"
-@@ -1051,6 +1142,7 @@ config ESPRESSIF_UART0_CTSPIN
+@@ -1051,6 +1153,7 @@ config ESPRESSIF_UART0_CTSPIN
  	range 0 21 if ESPRESSIF_ESP32C3
  	range 0 30 if ESPRESSIF_ESP32C6
  	range 0 27 if ESPRESSIF_ESP32H2
@@ -326,7 +344,7 @@ index 2e432d08143..7db147a59f5 100644
  
  endif # ESPRESSIF_UART0
  
-@@ -1071,6 +1163,7 @@ config ESPRESSIF_UART1_RTSPIN
+@@ -1071,6 +1174,7 @@ config ESPRESSIF_UART1_RTSPIN
  	range 0 21 if ESPRESSIF_ESP32C3
  	range 0 30 if ESPRESSIF_ESP32C6
  	range 0 27 if ESPRESSIF_ESP32H2
@@ -334,7 +352,7 @@ index 2e432d08143..7db147a59f5 100644
  
  config ESPRESSIF_UART1_CTSPIN
  	int "UART1 CTS Pin"
-@@ -1079,6 +1172,7 @@ config ESPRESSIF_UART1_CTSPIN
+@@ -1079,6 +1183,7 @@ config ESPRESSIF_UART1_CTSPIN
  	range 0 21 if ESPRESSIF_ESP32C3
  	range 0 30 if ESPRESSIF_ESP32C6
  	range 0 27 if ESPRESSIF_ESP32H2
@@ -342,6 +360,233 @@ index 2e432d08143..7db147a59f5 100644
  
  endif # ESPRESSIF_UART1
  
+@@ -1957,4 +2062,158 @@ config ESPRESSIF_TEMP_THREAD_STACKSIZE
+ 
+ endmenu # ESPRESSIF_TEMP
+ 
++# SILICONLOOP: 以太网配置块，搬自 Apache NuttX common/espressif/Kconfig。
++# 整块 depends on ESPRESSIF_EMAC，对未启用以太网的芯片无影响。
++
++menu "Ethernet Configuration"
++	depends on ESPRESSIF_EMAC
++
++config ESPRESSIF_ETH_NRXDESC
++	int "RX descriptor number"
++	default 20
++	---help---
++		Number of DMA receive descriptors/buffers used by the EMAC.
++		Each buffer is CONFIG_ESPRESSIF_ETH_DMA_BUFFER_SIZE bytes.
++		The default of 20 provides headroom for TCP-style ACK bursts
++		that arrive while the upper layer is busy submitting a TX burst
++		(otherwise the EMAC asserts RX_BUFF_UNAVAILABLE and silently
++		drops incoming frames, forcing TCP retransmissions).
++
++config ESPRESSIF_ETH_NTXDESC
++	int "TX descriptor number"
++	default 20
++	---help---
++		Number of DMA transmit descriptors/buffers used by the EMAC.
++		With CONFIG_ESPRESSIF_ETH_DMA_BUFFER_SIZE=1600, each descriptor
++		holds one Ethernet frame.  TCP send() bursts up to ~12 segments
++		back-to-back; 20 descriptors gives ample headroom so that
++		esp_eth_transmit() never returns ESP_ERR_NO_MEM mid-burst.
++		If the ring is exhausted, frames are silently dropped and
++		retransmissions happen via fast-retransmit/RTO, drastically
++		degrading throughput.
++
++config ESPRESSIF_ETH_DMA_BUFFER_SIZE
++	int "DMA buffer size (bytes)"
++	default 1600
++	range 256 1600
++	---help---
++		Size of each DMA buffer used by the EMAC (must match esp_eth's
++		CONFIG_ETH_DMA_BUFFER_SIZE).  At the maximum 1600 bytes one
++		buffer holds an entire 1518-byte Ethernet frame, so a typical
++		TX uses exactly one descriptor.  Lower values cause the MAC DMA
++		to chain multiple descriptors per frame, reducing the effective
++		number of frames the ring can hold.
++
++config ESPRESSIF_ETH_TX_MAX_RETRIES
++	int "TX submit retry budget"
++	default 32
++	range 1 256
++	---help---
++		Number of times emac_transmit() retries esp_eth_transmit() when
++		the DMA TX descriptor ring is fully owned by hardware
++		(ESP_ERR_NO_MEM).  Between attempts the driver yields the CPU
++		via sched_yield() so that the RX worker (and any other peer at
++		the same priority) can run while the EMAC DMA drains its TX
++		descriptors in the background.  The default of 32 covers a
++		full ring rotation under sustained TCP bursts while remaining
++		bounded; increase if the network has very high latency between
++		TX submissions and DMA descriptor recycling.
++
++config ESPRESSIF_ETH_PHY_ADDR
++	int "PHY address"
++	default 1
++	range 0 31
++	---help---
++		Address of the external Ethernet PHY on the SMI (MDC/MDIO) bus.
++
++config ESPRESSIF_ETH_MDC_GPIO
++	int "MDC GPIO"
++	default 31 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the PHY MDC pin.  The shipped default
++		corresponds to the ESP32-P4 Function EV Board V1.5.2; override
++		for other boards/SoCs.
++
++config ESPRESSIF_ETH_MDIO_GPIO
++	int "MDIO GPIO"
++	default 52 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the PHY MDIO pin.  The shipped default
++		corresponds to the ESP32-P4 Function EV Board V1.5.2; override
++		for other boards/SoCs.
++
++config ESPRESSIF_ETH_RMII_CLK_GPIO
++	int "RMII REF_CLK GPIO"
++	default 50 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number for the RMII 50MHz reference clock (input).  The
++		shipped default corresponds to the ESP32-P4 Function EV Board
++		V1.5.2; override for other boards/SoCs.
++
++config ESPRESSIF_ETH_RMII_TX_EN_GPIO
++	int "RMII TX_EN GPIO"
++	default 49 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII TX_EN pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_RMII_TXD0_GPIO
++	int "RMII TXD0 GPIO"
++	default 34 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII TXD0 pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_RMII_TXD1_GPIO
++	int "RMII TXD1 GPIO"
++	default 35 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII TXD1 pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_RMII_CRS_DV_GPIO
++	int "RMII CRS_DV GPIO"
++	default 28 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII CRS_DV pin.  Default is for
++		the ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_RMII_RXD0_GPIO
++	int "RMII RXD0 GPIO"
++	default 29 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII RXD0 pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_RMII_RXD1_GPIO
++	int "RMII RXD1 GPIO"
++	default 30 if ARCH_CHIP_ESP32P4
++	default -1
++	---help---
++		GPIO number connected to the RMII RXD1 pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++config ESPRESSIF_ETH_ENABLE_PHY_RSTPIN
++	bool "Enable PHY reset pin"
++	default y
++
++config ESPRESSIF_ETH_PHY_RST_GPIO
++	int "PHY reset GPIO"
++	default 51 if ARCH_CHIP_ESP32P4
++	default -1
++	depends on ESPRESSIF_ETH_ENABLE_PHY_RSTPIN
++	---help---
++		GPIO number connected to the PHY reset pin.  Default is for the
++		ESP32-P4 Function EV Board V1.5.2.
++
++endmenu # Ethernet Configuration
++
+ endif # ARCH_CHIP_ESPRESSIF
+diff --git a/arch/risc-v/src/common/espressif/esp_emac.h b/arch/risc-v/src/common/espressif/esp_emac.h
+new file mode 100644
+index 00000000000..9f6524a3495
+--- /dev/null
++++ b/arch/risc-v/src/common/espressif/esp_emac.h
+@@ -0,0 +1,62 @@
++/****************************************************************************
++ * arch/risc-v/src/common/espressif/esp_emac.h
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.  The
++ * ASF licenses this file to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance with the
++ * License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
++ * License for the specific language governing permissions and limitations
++ * under the License.
++ *
++ ****************************************************************************/
++
++#ifndef __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H
++#define __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++/****************************************************************************
++ * Public Function Prototypes
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: esp_emac_init
++ *
++ * Description:
++ *   Initialize the Ethernet driver and register it with the NuttX network
++ *   stack.
++ *
++ * Input Parameters:
++ *   None
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++int esp_emac_init(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H */
 diff --git a/arch/risc-v/src/esp32p4/.gitignore b/arch/risc-v/src/esp32p4/.gitignore
 new file mode 100644
 index 00000000000..4f35cf6fd45
@@ -555,10 +800,10 @@ index 00000000000..68ddf4b7a05
 +	default 0
 diff --git a/arch/risc-v/src/esp32p4/Make.defs b/arch/risc-v/src/esp32p4/Make.defs
 new file mode 100644
-index 00000000000..dd26b6ae12d
+index 00000000000..d373ca91cff
 --- /dev/null
 +++ b/arch/risc-v/src/esp32p4/Make.defs
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,66 @@
 +############################################################################
 +# arch/risc-v/src/esp32p4/Make.defs
 +#
@@ -583,10 +828,43 @@ index 00000000000..dd26b6ae12d
 +
 +ESP_HAL_3RDPARTY_VERSION = 8d0a898910084206721a0892ab093021bca1496a
 +VPATH := chip $(VPATH)
++
++# SILICONLOOP: 芯片专属头文件目录必须排在 common/espressif 之前，
++# 否则 esp_irq.h 等同名头文件会命中 common/espressif 下的旧版本。
++# 此处抢在 include common/espressif/Make.defs 之前追加，保证顺序。
++
++INCLUDES += ${INCDIR_PREFIX}$(ARCH_SRCDIR)$(DELIM)chip
++
 +include common/Make.defs
 +include common/espressif/Make.defs
 +
++# SILICONLOOP: HAL 目录一旦不存在就会被重新 clone，届时以下改动会全部丢失：
++#   1. mbedtls 子模块（openvela 将其初始化锁在 CONFIG_ESP_WIRELESS 条件内，
++#      但 bootloader_sha.c 无论是否启用无线都需要它）
++#   2. 队伍自维护的适配补丁（MMU/PMP 绕行 + nxtask_init 接口适配）
++# 使用 GNU Make 双冒号规则追加，不修改 C3/C6/H2 共用的 Make.defs。
++
++SILICONLOOP_PATCH_DIR = $(TOPDIR)/../contest2026_330_neiheyoumuzhe/patches
++
++context:: chip/$(ESP_HAL_3RDPARTY_REPO)
++	$(Q) if [ ! -f chip/$(ESP_HAL_3RDPARTY_REPO)/.siliconloop_ready ]; then \
++		echo "SiliconLoop: initializing mbedtls submodule"; \
++		git -C chip/$(ESP_HAL_3RDPARTY_REPO) submodule --quiet update --init --depth=1 components/mbedtls/mbedtls; \
++		git -C chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls reset --quiet --hard; \
++		(cd chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls && git apply ../../../nuttx/patches/components/mbedtls/mbedtls/*.patch); \
++		echo "SiliconLoop: applying team adaptation patches"; \
++		(cd chip/$(ESP_HAL_3RDPARTY_REPO) && git apply $(SILICONLOOP_PATCH_DIR)/0002-esp-hal-openvela-adaptation.patch); \
++		touch chip/$(ESP_HAL_3RDPARTY_REPO)/.siliconloop_ready; \
++	fi
++
 +CHIP_CSRCS += esp_chip_rev.c
++
++# SILICONLOOP: 以太网驱动。openvela 的 common/espressif 未提供 esp_emac.c，
++# 已从 Apache NuttX 搬入 P4 专属目录，经 VPATH 就近优先机制编译。
++
++ifeq ($(CONFIG_ESPRESSIF_EMAC),y)
++	CHIP_CSRCS += esp_emac.c
++endif
 +
 +CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
 +
@@ -686,6 +964,884 @@ index 00000000000..2f28ea20fc7
 +#endif
 +    }
 +}
+diff --git a/arch/risc-v/src/esp32p4/esp_emac.c b/arch/risc-v/src/esp32p4/esp_emac.c
+new file mode 100644
+index 00000000000..920230b19e3
+--- /dev/null
++++ b/arch/risc-v/src/esp32p4/esp_emac.c
+@@ -0,0 +1,804 @@
++/****************************************************************************
++ * arch/risc-v/src/common/espressif/esp_emac.c
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.  The
++ * ASF licenses this file to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance with the
++ * License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
++ * License for the specific language governing permissions and limitations
++ * under the License.
++ *
++ ****************************************************************************/
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#ifdef CONFIG_ESPRESSIF_EMAC
++
++#include <assert.h>
++#include <debug.h>
++#include <errno.h>
++#include <sched.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <arpa/inet.h>
++#include <net/if.h>
++
++#include <nuttx/arch.h>
++#include <nuttx/irq.h>
++#include <nuttx/kmalloc.h>
++#include <nuttx/mutex.h>
++#include <nuttx/queue.h>
++#include <nuttx/spinlock.h>
++#include <nuttx/net/ioctl.h>
++#include <nuttx/net/mii.h>
++#include <nuttx/net/netdev_lowerhalf.h>
++
++#include "esp_eth.h"
++#include "esp_eth_driver.h"
++#include "esp_eth_mac.h"
++#include "esp_eth_mac_esp.h"
++#include "esp_eth_phy.h"
++#include "esp_event.h"
++#include "esp_mac.h"
++
++#include "esp_emac.h"
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++#define ETH_HEADER_LEN          (14)
++#define ETH_VLANTAG_LEN         (4)
++#define ETH_MAXPAYLOAD_LEN      (1500)
++#define ETH_CRC_LEN             (4)
++
++#define ETH_MAXPKT_LEN          (ETH_HEADER_LEN + ETH_VLANTAG_LEN + \
++                                 ETH_MAXPAYLOAD_LEN + ETH_CRC_LEN)
++
++#define EMAC_PHY_ADDR           (CONFIG_ESPRESSIF_ETH_PHY_ADDR)
++#define NET2PRIV(_dev)          ((struct esp_emac_s *)(_dev))
++
++/****************************************************************************
++ * Private Types
++ ****************************************************************************/
++
++struct esp_emac_s
++{
++  struct netdev_lowerhalf_s dev;
++
++  esp_eth_handle_t    handle;
++
++  bool                installed;
++  bool                ifup;
++  bool                link_up;
++
++  spinlock_t          lock;
++  netpkt_queue_t      rxq;
++  uint8_t             txbuf[ETH_MAXPKT_LEN];
++};
++
++/****************************************************************************
++ * Private Data
++ ****************************************************************************/
++
++static struct esp_emac_s g_esp_emac;
++static mutex_t g_lock = NXMUTEX_INITIALIZER;
++
++/****************************************************************************
++ * Private Function Prototypes
++ ****************************************************************************/
++
++static int  emac_transmit(struct netdev_lowerhalf_s *dev, netpkt_t *pkt);
++static netpkt_t *emac_receive(struct netdev_lowerhalf_s *dev);
++static esp_err_t emac_stack_input(esp_eth_handle_t hdl,
++                                  uint8_t *buffer, uint32_t length,
++                                  void *priv_arg);
++static void emac_eth_event_handler(void *arg, esp_event_base_t base,
++                                   int32_t id, void *data);
++static int  emac_ifup(struct netdev_lowerhalf_s *dev);
++static int  emac_ifdown(struct netdev_lowerhalf_s *dev);
++#if defined(CONFIG_NET_MCASTGROUP) || defined(CONFIG_NET_ICMPv6)
++static int  emac_addmac(struct netdev_lowerhalf_s *dev, const uint8_t *mac);
++#endif
++#ifdef CONFIG_NET_MCASTGROUP
++static int  emac_rmmac(struct netdev_lowerhalf_s *dev, const uint8_t *mac);
++#endif
++#ifdef CONFIG_NETDEV_IOCTL
++static int  emac_ioctl(struct netdev_lowerhalf_s *dev, int cmd,
++                       unsigned long arg);
++#endif
++
++static const struct netdev_ops_s g_emac_ops =
++{
++  .ifup     = emac_ifup,
++  .ifdown   = emac_ifdown,
++  .transmit = emac_transmit,
++  .receive  = emac_receive,
++#ifdef CONFIG_NET_MCASTGROUP
++  .addmac   = emac_addmac,
++  .rmmac    = emac_rmmac,
++#endif
++#ifdef CONFIG_NETDEV_IOCTL
++  .ioctl    = emac_ioctl,
++#endif
++};
++
++/****************************************************************************
++ * Private Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: emac_transmit
++ *
++ * Description:
++ *   Push one outbound packet from the netdev lower-half TX path to esp_eth.
++ *
++ *   Backpressure handling:
++ *
++ *   When a TCP burst is in flight the EMAC DMA TX descriptor ring may be
++ *   fully owned by the DMA engine.  In that case esp_eth_transmit() returns
++ *   ESP_ERR_NO_MEM and we must wait until the hardware releases at least
++ *   one descriptor before submitting the frame, otherwise the upper layer
++ *   would treat the frame as lost and only recover via TCP retransmission,
++ *   which collapses throughput.
++ *
++ *   The wait is implemented with sched_yield() rather than a fixed-time
++ *   delay: it relinquishes the CPU to any runnable peer (most importantly
++ *   the RX worker that consumes inbound TCP ACKs) without imposing an
++ *   arbitrary sleep, while the EMAC DMA hardware drains its TX descriptors
++ *   in parallel with no CPU involvement.
++ *
++ * Input Parameters:
++ *   dev - Lower-half network device state.
++ *   pkt - Packet to transmit.
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++static int emac_transmit(struct netdev_lowerhalf_s *dev, netpkt_t *pkt)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++  unsigned int len;
++  esp_err_t err;
++  unsigned int retries = 0;
++  int ret;
++
++  len = netpkt_getdatalen(dev, pkt);
++
++  if (!priv->installed || !priv->ifup)
++    {
++      return -ENETDOWN;
++    }
++
++  if (len == 0 || len > ETH_MAXPKT_LEN)
++    {
++      return -EMSGSIZE;
++    }
++
++  ret = netpkt_copyout(dev, priv->txbuf, pkt, len, 0);
++  if (ret < 0)
++    {
++      return ret;
++    }
++
++  do
++    {
++      err = esp_eth_transmit(priv->handle, priv->txbuf, len);
++      if (err != ESP_ERR_NO_MEM)
++        {
++          break;
++        }
++
++      sched_yield();
++    }
++  while (++retries < CONFIG_ESPRESSIF_ETH_TX_MAX_RETRIES);
++
++  if (err != ESP_OK)
++    {
++      nerr("ERROR: esp_eth_transmit failed: %d\n", (int)err);
++      return -EIO;
++    }
++
++  netpkt_free(dev, pkt, NETPKT_TX);
++  netdev_lower_txdone(dev);
++  return OK;
++}
++
++/****************************************************************************
++ * Name: emac_receive
++ *
++ * Description:
++ *   Pop one received packet from the RX queue and hand it to upper-half.
++ *
++ * Input Parameters:
++ *   dev - Lower-half network device state.
++ *
++ * Returned Value:
++ *   Received packet pointer on success; NULL when no packet is queued.
++ *
++ ****************************************************************************/
++
++static netpkt_t *emac_receive(struct netdev_lowerhalf_s *dev)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++  irqstate_t flags;
++  netpkt_t *pkt;
++
++  flags = spin_lock_irqsave(&priv->lock);
++  pkt = netpkt_remove_queue(&priv->rxq);
++  spin_unlock_irqrestore(&priv->lock, flags);
++  return pkt;
++}
++
++/****************************************************************************
++ * Name: emac_stack_input
++ *
++ * Description:
++ *   esp_eth input-path callback. Convert the received frame to netpkt and
++ *   queue it to be consumed by netdev upper-half.
++ *
++ * Input Parameters:
++ *   hdl      - esp_eth driver handle.
++ *   buffer   - Frame buffer allocated by esp_eth (ownership transferred).
++ *   length   - Frame length in bytes.
++ *   priv_arg - Opaque pointer to struct esp_emac_s.
++ *
++ * Returned Value:
++ *   ESP_OK on success; ESP_ERR_NO_MEM on allocation or queue failures.
++ *
++ ****************************************************************************/
++
++static esp_err_t emac_stack_input(esp_eth_handle_t hdl,
++                                  uint8_t *buffer, uint32_t length,
++                                  void *priv_arg)
++{
++  struct esp_emac_s *priv = (struct esp_emac_s *)priv_arg;
++  netpkt_t *pkt;
++  irqstate_t flags;
++  int ret;
++
++  UNUSED(hdl);
++
++  pkt = netpkt_alloc(&priv->dev, NETPKT_RX);
++  if (pkt == NULL)
++    {
++      nerr("ERROR: emac RX netpkt_alloc failed\n");
++      free(buffer);
++      return ESP_ERR_NO_MEM;
++    }
++
++  ret = netpkt_copyin(&priv->dev, pkt, buffer, length, 0);
++  free(buffer);
++  if (ret < 0)
++    {
++      netpkt_free(&priv->dev, pkt, NETPKT_RX);
++      return ESP_ERR_NO_MEM;
++    }
++
++  flags = spin_lock_irqsave(&priv->lock);
++  ret = netpkt_tryadd_queue(pkt, &priv->rxq);
++  spin_unlock_irqrestore(&priv->lock, flags);
++
++  if (ret < 0)
++    {
++      nerr("ERROR: emac RX queue full\n");
++      netpkt_free(&priv->dev, pkt, NETPKT_RX);
++      return ESP_ERR_NO_MEM;
++    }
++
++  netdev_lower_rxready(&priv->dev);
++  return ESP_OK;
++}
++
++/****************************************************************************
++ * Name: emac_eth_event_handler
++ *
++ * Description:
++ *   Receive ETH_EVENT notifications posted by esp_eth (link up/down,
++ *   start/stop) and update NuttX carrier state accordingly.
++ *
++ * Input Parameters:
++ *   arg  - Opaque pointer to struct esp_emac_s.
++ *   base - Event base (unused; expected ETH_EVENT).
++ *   id   - Event identifier (ETHERNET_EVENT_*).
++ *   data - Event payload.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++static void emac_eth_event_handler(void *arg, esp_event_base_t base,
++                                   int32_t id, void *data)
++{
++  struct esp_emac_s *priv = (struct esp_emac_s *)arg;
++
++  UNUSED(base);
++  UNUSED(data);
++
++  switch (id)
++    {
++      case ETHERNET_EVENT_CONNECTED:
++        ninfo("Ethernet link up\n");
++        priv->link_up = true;
++        netdev_lower_carrier_on(&priv->dev);
++        break;
++
++      case ETHERNET_EVENT_DISCONNECTED:
++        ninfo("Ethernet link down\n");
++        priv->link_up = false;
++        netdev_lower_carrier_off(&priv->dev);
++        break;
++
++      case ETHERNET_EVENT_START:
++        ninfo("Ethernet started\n");
++        break;
++
++      case ETHERNET_EVENT_STOP:
++        ninfo("Ethernet stopped\n");
++        break;
++
++      default:
++        break;
++    }
++}
++
++/****************************************************************************
++ * Name: emac_ifup
++ *
++ * Description:
++ *   Bring the network interface up and start the esp_eth state machine.
++ *
++ * Input Parameters:
++ *   dev - NuttX network interface state.
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++static int emac_ifup(struct netdev_lowerhalf_s *dev)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++  esp_err_t err;
++
++#ifdef CONFIG_NET_IPv4
++  ninfo("Bringing up: %d.%d.%d.%d\n",
++        (int)(dev->netdev.d_ipaddr & 0xff),
++        (int)((dev->netdev.d_ipaddr >> 8) & 0xff),
++        (int)((dev->netdev.d_ipaddr >> 16) & 0xff),
++        (int)((dev->netdev.d_ipaddr >> 24) & 0xff));
++#endif
++
++  if (!priv->installed)
++    {
++      nerr("ERROR: esp_eth driver not installed\n");
++      return -ENODEV;
++    }
++
++  if (priv->ifup)
++    {
++      return OK;
++    }
++
++  err = esp_eth_start(priv->handle);
++  if (err != ESP_OK)
++    {
++      nerr("ERROR: esp_eth_start failed: %d\n", (int)err);
++      return -EIO;
++    }
++
++  priv->ifup = true;
++  return OK;
++}
++
++/****************************************************************************
++ * Name: emac_ifdown
++ *
++ * Description:
++ *   Bring the network interface down and stop the esp_eth state machine.
++ *
++ * Input Parameters:
++ *   dev - NuttX network interface state.
++ *
++ * Returned Value:
++ *   OK.
++ *
++ ****************************************************************************/
++
++static int emac_ifdown(struct netdev_lowerhalf_s *dev)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++  esp_err_t err;
++
++  ninfo("Taking the network down\n");
++
++  if (!priv->ifup)
++    {
++      return OK;
++    }
++
++  err = esp_eth_stop(priv->handle);
++  if (err != ESP_OK)
++    {
++      nerr("ERROR: esp_eth_stop failed: %d\n", (int)err);
++    }
++
++  priv->ifup = false;
++  priv->link_up = false;
++  netdev_lower_carrier_off(dev);
++
++  return OK;
++}
++
++#if defined(CONFIG_NET_MCASTGROUP) || defined(CONFIG_NET_ICMPv6)
++/****************************************************************************
++ * Name: emac_addmac
++ *
++ * Description:
++ *   Add a multicast MAC address filter entry to the underlying ESP Ethernet
++ *   driver.
++ *
++ * Input Parameters:
++ *   dev - NuttX network interface state.
++ *   mac - MAC address to add to the multicast filter list.
++ *
++ * Returned Value:
++ *   OK.
++ *
++ ****************************************************************************/
++
++static int emac_addmac(struct netdev_lowerhalf_s *dev, const uint8_t *mac)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++
++  ninfo("MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
++        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++
++  esp_eth_ioctl(priv->handle, ETH_CMD_ADD_MAC_FILTER, (void *)mac);
++  return OK;
++}
++#endif
++
++#ifdef CONFIG_NET_MCASTGROUP
++/****************************************************************************
++ * Name: emac_rmmac
++ *
++ * Description:
++ *   Remove a multicast MAC address filter entry from the underlying ESP
++ *   Ethernet driver.
++ *
++ * Input Parameters:
++ *   dev - NuttX network interface state.
++ *   mac - MAC address to remove from the multicast filter list.
++ *
++ * Returned Value:
++ *   OK.
++ *
++ ****************************************************************************/
++
++static int emac_rmmac(struct netdev_lowerhalf_s *dev, const uint8_t *mac)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++
++  ninfo("MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
++        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++
++  esp_eth_ioctl(priv->handle, ETH_CMD_DEL_MAC_FILTER, (void *)mac);
++  return OK;
++}
++#endif
++
++#ifdef CONFIG_NETDEV_IOCTL
++/****************************************************************************
++ * Name: emac_ioctl
++ *
++ * Description:
++ *   Handle network device ioctl requests supported by the ESP EMAC driver.
++ *
++ * Input Parameters:
++ *   dev - NuttX network interface state.
++ *   cmd - Ioctl command code.
++ *   arg - Command-specific argument.
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++static int emac_ioctl(struct netdev_lowerhalf_s *dev, int cmd,
++                      unsigned long arg)
++{
++  struct esp_emac_s *priv = NET2PRIV(dev);
++  int ret;
++
++  ret = nxmutex_lock(&g_lock);
++  if (ret < 0)
++    {
++      return ret;
++    }
++
++  switch (cmd)
++    {
++#ifdef CONFIG_NETDEV_PHY_IOCTL
++      case SIOCGMIIPHY:
++        {
++          struct mii_ioctl_data_s *req =
++              (struct mii_ioctl_data_s *)((uintptr_t)arg);
++          uint32_t phy_addr = 0;
++
++          if (esp_eth_ioctl(priv->handle, ETH_CMD_G_PHY_ADDR, &phy_addr)
++              == ESP_OK)
++            {
++              req->phy_id = (uint16_t)phy_addr;
++              ret = OK;
++            }
++          else
++            {
++              ret = -EIO;
++            }
++        }
++        break;
++
++      case SIOCGMIIREG:
++        {
++          struct mii_ioctl_data_s *req =
++              (struct mii_ioctl_data_s *)((uintptr_t)arg);
++          esp_eth_phy_reg_rw_data_t rw;
++          uint32_t val = 0;
++
++          rw.reg_addr = req->reg_num;
++          rw.reg_value_p = &val;
++          if (esp_eth_ioctl(priv->handle, ETH_CMD_READ_PHY_REG, &rw)
++              == ESP_OK)
++            {
++              req->val_out = (uint16_t)val;
++              ret = OK;
++            }
++          else
++            {
++              ret = -EIO;
++            }
++        }
++        break;
++
++      case SIOCSMIIREG:
++        {
++          struct mii_ioctl_data_s *req =
++              (struct mii_ioctl_data_s *)((uintptr_t)arg);
++          esp_eth_phy_reg_rw_data_t rw;
++          uint32_t val = req->val_in;
++
++          rw.reg_addr = req->reg_num;
++          rw.reg_value_p = &val;
++          if (esp_eth_ioctl(priv->handle, ETH_CMD_WRITE_PHY_REG, &rw)
++              == ESP_OK)
++            {
++              ret = OK;
++            }
++          else
++            {
++              ret = -EIO;
++            }
++        }
++        break;
++#endif /* CONFIG_NETDEV_PHY_IOCTL */
++
++      default:
++        ret = -ENOTTY;
++        break;
++    }
++
++  nxmutex_unlock(&g_lock);
++  return ret;
++}
++#endif /* CONFIG_NETDEV_IOCTL */
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: esp_emac_init
++ *
++ * Description:
++ *   Create the esp_eth MAC+PHY+driver stack, register our RX callback and
++ *   ETH_EVENT handler, pull the factory-programmed MAC address from eFuse
++ *   and register the interface with the NuttX network stack.
++ *
++ * Input Parameters:
++ *   None.
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++volatile int g_sl_emac_step = 0;
++volatile int g_sl_emac_err = 0;
++
++int esp_emac_init(void)
++{
++  struct esp_emac_s *priv = &g_esp_emac;
++  esp_eth_mac_t *mac = NULL;
++  esp_eth_phy_t *phy = NULL;
++  unsigned int quota;
++  uint8_t mac_addr[6];
++  esp_err_t err;
++  int ret;
++
++  eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
++  eth_esp32_emac_config_t esp32_cfg = ETH_ESP32_EMAC_DEFAULT_CONFIG();
++  eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
++
++  memset(priv, 0, sizeof(*priv));
++  IOB_QINIT(&priv->rxq);
++  spin_lock_init(&priv->lock);
++
++  /* Override default RMII/SMI pin configuration from Kconfig. */
++
++  esp32_cfg.smi_gpio.mdc_num  = CONFIG_ESPRESSIF_ETH_MDC_GPIO;
++  esp32_cfg.smi_gpio.mdio_num = CONFIG_ESPRESSIF_ETH_MDIO_GPIO;
++
++#if defined(SOC_EMAC_USE_MULTI_IO_MUX) || defined(SOC_EMAC_MII_USE_GPIO_MATRIX)
++  esp32_cfg.emac_dataif_gpio.rmii.tx_en_num  =
++      CONFIG_ESPRESSIF_ETH_RMII_TX_EN_GPIO;
++  esp32_cfg.emac_dataif_gpio.rmii.txd0_num   =
++      CONFIG_ESPRESSIF_ETH_RMII_TXD0_GPIO;
++  esp32_cfg.emac_dataif_gpio.rmii.txd1_num   =
++      CONFIG_ESPRESSIF_ETH_RMII_TXD1_GPIO;
++  esp32_cfg.emac_dataif_gpio.rmii.crs_dv_num =
++      CONFIG_ESPRESSIF_ETH_RMII_CRS_DV_GPIO;
++  esp32_cfg.emac_dataif_gpio.rmii.rxd0_num   =
++      CONFIG_ESPRESSIF_ETH_RMII_RXD0_GPIO;
++  esp32_cfg.emac_dataif_gpio.rmii.rxd1_num   =
++      CONFIG_ESPRESSIF_ETH_RMII_RXD1_GPIO;
++#endif
++
++  esp32_cfg.clock_config.rmii.clock_gpio =
++      CONFIG_ESPRESSIF_ETH_RMII_CLK_GPIO;
++
++  phy_cfg.phy_addr = EMAC_PHY_ADDR;
++#ifdef CONFIG_ESPRESSIF_ETH_ENABLE_PHY_RSTPIN
++  phy_cfg.reset_gpio_num = CONFIG_ESPRESSIF_ETH_PHY_RST_GPIO;
++#else
++  phy_cfg.reset_gpio_num = -1;
++#endif
++
++  mac = esp_eth_mac_new_esp32(&esp32_cfg, &mac_config);
++  if (mac == NULL)
++    {
++      g_sl_emac_step = 1;
++      nerr("ERROR: esp_eth_mac_new_esp32 failed\n");
++      return -EIO;
++    }
++
++  phy = esp_eth_phy_new_generic(&phy_cfg);
++  if (phy == NULL)
++    {
++      g_sl_emac_step = 2;
++      nerr("ERROR: esp_eth_phy_new_generic failed\n");
++      mac->del(mac);
++      return -EIO;
++    }
++
++    {
++      esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
++
++      err = esp_eth_driver_install(&eth_cfg, &priv->handle);
++      if (err != ESP_OK)
++        {
++          g_sl_emac_step = 3;
++          g_sl_emac_err = (int)err;
++          nerr("ERROR: esp_eth_driver_install failed: %d\n", (int)err);
++          phy->del(phy);
++          mac->del(mac);
++          return -EIO;
++        }
++    }
++
++  priv->installed = true;
++
++  err = esp_eth_update_input_path(priv->handle, emac_stack_input, priv);
++  if (err != ESP_OK)
++    {
++      g_sl_emac_step = 4;
++      g_sl_emac_err = (int)err;
++      nerr("ERROR: esp_eth_update_input_path failed: %d\n", (int)err);
++      ret = -EIO;
++      goto errout;
++    }
++
++  err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
++                                   emac_eth_event_handler, priv);
++  if (err != ESP_OK)
++    {
++      g_sl_emac_step = 5;
++      g_sl_emac_err = (int)err;
++      nerr("ERROR: esp_event_handler_register(ETH_EVENT) failed: %d\n",
++           (int)err);
++      ret = -EIO;
++      goto errout;
++    }
++
++  /* Apply the factory-programmed MAC address (eFuse) to the MAC. */
++
++  err = esp_read_mac(mac_addr, ESP_MAC_ETH);
++  if (err != ESP_OK)
++    {
++      nwarn("WARNING: esp_read_mac(ESP_MAC_ETH) failed: %d\n", (int)err);
++      mac_addr[0] = 0x02;
++      mac_addr[1] = 0x00;
++      mac_addr[2] = 0x00;
++      mac_addr[3] = 0x00;
++      mac_addr[4] = 0x00;
++      mac_addr[5] = 0x01;
++    }
++
++  esp_eth_ioctl(priv->handle, ETH_CMD_S_MAC_ADDR, mac_addr);
++  memcpy(priv->dev.netdev.d_mac.ether.ether_addr_octet, mac_addr, 6);
++  priv->dev.ops = &g_emac_ops;
++
++  /* Keep quotas well below the global netpkt pool size so lower-half
++   * registration remains valid across different board configurations.
++   */
++
++  quota = NETPKT_BUFNUM / 4;
++  if (quota == 0)
++    {
++      quota = 1;
++    }
++
++  priv->dev.quota[NETPKT_RX] = quota;
++  priv->dev.quota[NETPKT_TX] = quota;
++  priv->dev.rxtype = NETDEV_RX_WORK;
++  priv->dev.priority = LPWORK;
++
++  ret = netdev_lower_register(&priv->dev, NET_LL_ETHERNET);
++  if (ret != 0)
++    {
++      g_sl_emac_step = 6;
++      g_sl_emac_err = ret;
++      nerr("ERROR: netdev_lower_register failed: %d\n", ret);
++      goto errout_event;
++    }
++
++  ninfo("esp_emac: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
++        mac_addr[0], mac_addr[1], mac_addr[2],
++        mac_addr[3], mac_addr[4], mac_addr[5]);
++
++  return OK;
++
++errout_event:
++  esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID,
++                               emac_eth_event_handler);
++
++errout:
++  if (priv->installed)
++    {
++      esp_eth_driver_uninstall(priv->handle);
++      priv->installed = false;
++    }
++
++  return ret;
++}
++
++#endif /* CONFIG_ESPRESSIF_EMAC */
+diff --git a/arch/risc-v/src/esp32p4/esp_emac.h b/arch/risc-v/src/esp32p4/esp_emac.h
+new file mode 100644
+index 00000000000..9f6524a3495
+--- /dev/null
++++ b/arch/risc-v/src/esp32p4/esp_emac.h
+@@ -0,0 +1,62 @@
++/****************************************************************************
++ * arch/risc-v/src/common/espressif/esp_emac.h
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.  The
++ * ASF licenses this file to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance with the
++ * License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
++ * License for the specific language governing permissions and limitations
++ * under the License.
++ *
++ ****************************************************************************/
++
++#ifndef __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H
++#define __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++/****************************************************************************
++ * Public Function Prototypes
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: esp_emac_init
++ *
++ * Description:
++ *   Initialize the Ethernet driver and register it with the NuttX network
++ *   stack.
++ *
++ * Input Parameters:
++ *   None
++ *
++ * Returned Value:
++ *   OK on success; a negated errno value on failure.
++ *
++ ****************************************************************************/
++
++int esp_emac_init(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_EMAC_H */
 diff --git a/arch/risc-v/src/esp32p4/esp_gpio.c b/arch/risc-v/src/esp32p4/esp_gpio.c
 new file mode 100644
 index 00000000000..58d585ec512
@@ -1479,6 +2635,803 @@ index 00000000000..0410628c917
 +
 +#endif /* __ASSEMBLY__ */
 +#endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_GPIO_H */
+diff --git a/arch/risc-v/src/esp32p4/esp_hr_timer.c b/arch/risc-v/src/esp32p4/esp_hr_timer.c
+new file mode 100644
+index 00000000000..f7d7282655e
+--- /dev/null
++++ b/arch/risc-v/src/esp32p4/esp_hr_timer.c
+@@ -0,0 +1,791 @@
++/****************************************************************************
++ * arch/risc-v/src/common/espressif/esp_hr_timer.c
++ *
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this args for additional information regarding copyright ownership.  The
++ * ASF licenses this file to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance with the
++ * License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
++ * License for the specific language governing permissions and limitations
++ * under the License.
++ *
++ ****************************************************************************/
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <nuttx/config.h>
++
++#include <assert.h>
++#include <debug.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/types.h>
++
++#include <nuttx/nuttx.h>
++#include <nuttx/irq.h>
++#include <nuttx/kmalloc.h>
++#include <nuttx/kthread.h>
++#include <nuttx/semaphore.h>
++#include <nuttx/spinlock.h>
++
++#include "esp_irq.h"
++#include "esp_hr_timer.h"
++
++#include "esp_attr.h"
++#include "hal/systimer_hal.h"
++#include "hal/systimer_ll.h"
++#include "periph_ctrl.h"
++#include "systimer.h"
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++#if SOC_SYSTIMER_INT_LEVEL
++#  define SYSTIMER_TRIGGER_TYPE ESP_IRQ_TRIGGER_LEVEL
++#else
++#  define SYSTIMER_TRIGGER_TYPE ESP_IRQ_TRIGGER_EDGE
++#endif /* SOC_SYSTIMER_INT_LEVEL */
++
++#ifdef CONFIG_SCHED_HPWORK
++static_assert(CONFIG_ESPRESSIF_HR_TIMER_TASK_PRIORITY <
++                CONFIG_SCHED_HPWORKPRIORITY,
++              "High Resolution Timer task priority should be smaller than"
++                " High priority worker thread");
++#endif
++
++/****************************************************************************
++ * Private Types
++ ****************************************************************************/
++
++struct esp_hr_timer_context_s
++{
++  pid_t pid;
++  sem_t toutsem;
++  struct list_node runlist;
++  struct list_node toutlist;
++  spinlock_t lock;
++  systimer_hal_context_t hal;
++};
++
++/****************************************************************************
++ * Private Function Prototypes
++ ****************************************************************************/
++
++static int esp_hr_timer_thread(int argc, char *argv[]);
++static int esp_hr_timer_isr(int irq, void *context, void *arg);
++
++/****************************************************************************
++ * Private Data
++ ****************************************************************************/
++
++static struct esp_hr_timer_context_s g_hr_timer_context =
++{
++  .pid = INVALID_PROCESS_ID,
++  .toutsem = SEM_INITIALIZER(0),
++};
++
++static bool g_hr_timer_initialized;
++
++/****************************************************************************
++ * Private Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: esp_hr_timer_thread
++ *
++ * Description:
++ *   HR Timer working thread: Waits for a timeout semaphore, scans
++ *   the timeout list and processes all the timers in the list.
++ *
++ * Input Parameters:
++ *   argc          - Not used.
++ *   argv          - Not used.
++ *
++ * Returned Value:
++ *   Zero (OK) is returned on success; a negated errno value is returned on
++ *   any failure.
++ *
++ ****************************************************************************/
++
++IRAM_ATTR static int esp_hr_timer_thread(int argc, char *argv[])
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  while (true)
++    {
++      /* Waiting for all timers to time out */
++
++      VERIFY(nxsem_wait_uninterruptible(&priv->toutsem));
++
++      irqstate_t flags = spin_lock_irqsave(&priv->lock);
++
++      /* Process all the timers in list */
++
++      while (!list_is_empty(&priv->toutlist))
++        {
++          struct esp_hr_timer_s *timer;
++          enum esp_hr_timer_state_e raw_state;
++
++          /* Get the first timer in the list */
++
++          timer = container_of(priv->toutlist.next,
++                               struct esp_hr_timer_s, list);
++
++          /* Cache the raw state to decide how to deal with this timer */
++
++          raw_state = timer->state;
++
++          /* Delete the timer from the list */
++
++          list_delete(&timer->list);
++
++          /* Set timer's state to idle so it can be restarted by the user. */
++
++          timer->state = HR_TIMER_IDLE;
++
++          spin_unlock_irqrestore(&priv->lock, flags);
++
++          if (raw_state == HR_TIMER_TIMEOUT)
++            {
++              timer->callback(timer->arg);
++            }
++          else if (raw_state == HR_TIMER_DELETE)
++            {
++              kmm_free(timer);
++            }
++
++          /* Enter critical section for next scanning list */
++
++          flags = spin_lock_irqsave(&priv->lock);
++
++          if (raw_state == HR_TIMER_TIMEOUT)
++            {
++              /* Check if the timer is in "repeat" mode */
++
++              if (timer->flags & HR_TIMER_REPEAT)
++                {
++                  esp_hr_timer_start(timer, timer->timeout, true);
++                }
++            }
++        }
++
++      spin_unlock_irqrestore(&priv->lock, flags);
++    }
++
++  return 0;
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_isr
++ *
++ * Description:
++ *   Handler to be executed by the Systimer ISR.
++ *
++ * Input Parameters:
++ *   irq           - IRQ associated to that interrupt.
++ *   context       - Interrupt register state save info.
++ *   arg           - A pointer to the argument provided when the interrupt
++ *                   was registered.
++ *
++ * Returned Value:
++ *   Zero (OK) is returned on success; a negated errno value is returned on
++ *   any failure.
++ *
++ ****************************************************************************/
++
++static int IRAM_ATTR esp_hr_timer_isr(int irq, void *context, void *arg)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++  bool wake = false;
++  irqstate_t flags;
++
++  /* Clear interrupt register status */
++
++  systimer_ll_clear_alarm_int(priv->hal.dev, SYSTIMER_ALARM_ESPTIMER);
++
++  flags = enter_critical_section();
++
++  /* Check if there is a timer running */
++
++  if (!list_is_empty(&priv->runlist))
++    {
++      struct esp_hr_timer_s *timer;
++      uint64_t counter;
++
++      /* When stop/delete timer, in the same time the hardware timer
++       * interrupt triggers, function "stop/delete" remove the timer
++       * from running list, so the 1st timer is not which triggers.
++       */
++
++      timer = container_of(priv->runlist.next, struct esp_hr_timer_s, list);
++      counter = systimer_hal_get_time(&priv->hal, SYSTIMER_COUNTER_ESPTIMER);
++      if (timer->alarm <= counter)
++        {
++          /* Remove the first timer from the running list and add it to
++           * the timeout list.
++           *
++           * Set the timer's state to be HR_TIMER_TIMEOUT to avoid
++           * other operations.
++           */
++
++          list_delete(&timer->list);
++          timer->state = HR_TIMER_TIMEOUT;
++          list_add_after(&priv->toutlist, &timer->list);
++          wake = true;
++
++          /* Check if there is a timer running */
++
++          if (!list_is_empty(&priv->runlist))
++            {
++              /* Reset hardware timer alarm with next timer's alarm value */
++
++              timer = container_of(priv->runlist.next,
++                                   struct esp_hr_timer_s, list);
++
++              systimer_counter_value_t systimer_alarm =
++                {
++                  .val = priv->hal.us_to_ticks(timer->alarm),
++                };
++
++              systimer_ll_enable_alarm(priv->hal.dev,
++                                       SYSTIMER_ALARM_ESPTIMER, false);
++              systimer_ll_set_alarm_target(priv->hal.dev,
++                                           SYSTIMER_ALARM_ESPTIMER,
++                                           systimer_alarm.val);
++              systimer_ll_apply_alarm_value(priv->hal.dev,
++                                            SYSTIMER_ALARM_ESPTIMER);
++            }
++        }
++
++      /* If there is a timer in the list, the alarm should be enabled */
++
++      systimer_ll_enable_alarm(priv->hal.dev, SYSTIMER_ALARM_ESPTIMER, true);
++    }
++
++  if (wake)
++    {
++      /* Wake up the thread to process timed-out timers */
++
++      int ret = nxsem_post(&priv->toutsem);
++      if (ret < 0)
++        {
++          tmrerr("Failed to post sem ret=%d\n", ret);
++        }
++    }
++
++  leave_critical_section(flags);
++
++  return OK;
++}
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: esp_hr_timer_create
++ *
++ * Description:
++ *   Create a High Resolution Timer from the provided arguments.
++ *
++ * Input Parameters:
++ *   args          - HR Timer creation arguments.
++ *
++ * Output Parameters:
++ *   timer_handle  - HR Timer handle pointer.
++ *
++ * Returned Value:
++ *   Zero (OK) is returned on success; a negated errno value is returned on
++ *   any failure.
++ *
++ ****************************************************************************/
++
++int IRAM_ATTR esp_hr_timer_create(const struct esp_hr_timer_args_s *args,
++                                  struct esp_hr_timer_s **timer_handle)
++{
++  struct esp_hr_timer_s *timer;
++
++  timer = kmm_malloc(sizeof(*timer));
++  if (timer == NULL)
++    {
++      tmrerr("Failed to allocate %d bytes\n", sizeof(*timer));
++
++      return -ENOMEM;
++    }
++
++  timer->callback = args->callback;
++  timer->arg      = args->arg;
++  timer->flags    = HR_TIMER_NOFLAGS;
++  timer->state    = HR_TIMER_IDLE;
++  list_initialize(&timer->list);
++
++  *timer_handle = timer;
++
++  return OK;
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_start
++ *
++ * Description:
++ *   Start the High Resolution Timer.
++ *
++ * Input Parameters:
++ *   timer         - HR Timer pointer.
++ *   timeout       - Timeout value.
++ *   repeat        - Repeat mode (true: enabled, false: disabled).
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void IRAM_ATTR esp_hr_timer_start(struct esp_hr_timer_s *timer,
++                                  uint64_t timeout,
++                                  bool repeat)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++  bool inserted = false;
++  uint64_t counter;
++  struct esp_hr_timer_s *p;
++  irqstate_t flags = spin_lock_irqsave(&priv->lock);
++
++  /* Only idle timer can be started */
++
++  if (timer->state != HR_TIMER_IDLE)
++    {
++      esp_hr_timer_stop_nolock(timer);
++    }
++
++  /* Calculate the timer's alarm value */
++
++  counter = systimer_hal_get_time(&priv->hal, SYSTIMER_COUNTER_ESPTIMER);
++  timer->timeout = timeout;
++  timer->alarm = timer->timeout + counter;
++
++  if (repeat)
++    {
++      timer->flags |= HR_TIMER_REPEAT;
++    }
++  else
++    {
++      timer->flags &= ~HR_TIMER_REPEAT;
++    }
++
++  /* Scan the timer list and insert the new timer into previous
++   * node of timer whose alarm value is larger than new one
++   */
++
++  list_for_every_entry(&priv->runlist, p, struct esp_hr_timer_s, list)
++    {
++      if (p->alarm > timer->alarm)
++        {
++          list_add_before(&p->list, &timer->list);
++          inserted = true;
++          break;
++        }
++    }
++
++  /* If we didn't find a larger one, insert the new timer at the tail
++   * of the list.
++   */
++
++  if (!inserted)
++    {
++      list_add_tail(&priv->runlist, &timer->list);
++    }
++
++  timer->state = HR_TIMER_READY;
++
++  /* If this timer is at the head of the list */
++
++  if (timer == container_of(priv->runlist.next,
++                            struct esp_hr_timer_s, list))
++    {
++      /* Reset the hardware timer alarm */
++
++      systimer_hal_set_alarm_target(&priv->hal, SYSTIMER_ALARM_ESPTIMER,
++                                    timer->alarm);
++    }
++
++  spin_unlock_irqrestore(&priv->lock, flags);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_start_once
++ *
++ * Description:
++ *   Start the High Resolution Timer with one shot mode.
++ *
++ * Input Parameters:
++ *   timer         - HR Timer pointer.
++ *   timeout       - Timeout value.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void esp_hr_timer_start_once(struct esp_hr_timer_s *timer, uint64_t timeout)
++{
++  esp_hr_timer_start(timer, timeout, false);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_start_periodic
++ *
++ * Description:
++ *   Start the High Resolution Timer with periodic mode.
++ *
++ * Input Parameters:
++ *   timer         - HR Timer pointer.
++ *   timeout       - Timeout value.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void esp_hr_timer_start_periodic(struct esp_hr_timer_s *timer,
++                                 uint64_t timeout)
++{
++  esp_hr_timer_start(timer, timeout, true);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_stop
++ *
++ * Description:
++ *   Stop the High Resolution Timer.
++ *
++ * Input Parameters:
++ *   timer         - HR Timer pointer.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void IRAM_ATTR esp_hr_timer_stop_nolock(struct esp_hr_timer_s *timer)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  /* "start" function can set the timer's repeat flag, and "stop" function
++   * should remove this flag.
++   */
++
++  timer->flags &= ~HR_TIMER_REPEAT;
++
++  /* Only timers in "ready" state can be stopped */
++
++  if (timer->state == HR_TIMER_READY)
++    {
++      bool ishead;
++
++      /* Check if the timer is at the head of the list */
++
++      if (timer == container_of(priv->runlist.next,
++                                struct esp_hr_timer_s, list))
++        {
++          ishead = true;
++        }
++      else
++        {
++          ishead = false;
++        }
++
++      list_delete(&timer->list);
++      timer->state = HR_TIMER_IDLE;
++
++      /* If the timer is at the head of the list */
++
++      if (ishead)
++        {
++          if (!list_is_empty(&priv->runlist))
++            {
++              struct esp_hr_timer_s *next_timer;
++
++              /* Set the value from the next timer as the new hardware timer
++               * alarm value.
++               */
++
++              next_timer = container_of(priv->runlist.next,
++                                        struct esp_hr_timer_s,
++                                        list);
++
++              systimer_hal_set_alarm_target(&priv->hal,
++                                            SYSTIMER_ALARM_ESPTIMER,
++                                            next_timer->alarm);
++            }
++        }
++    }
++  else if (timer->state == HR_TIMER_TIMEOUT)
++    {
++      /* If the timer is in the timeout list, remove it from the list,
++       * execute its callback function and set its state to idle.
++       */
++
++      DEBUGASSERT(!list_is_empty(&priv->toutlist));
++
++      list_delete(&timer->list);
++      timer->state = HR_TIMER_IDLE;
++      timer->callback(timer->arg);
++    }
++}
++
++void IRAM_ATTR esp_hr_timer_stop(struct esp_hr_timer_s *timer)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  irqstate_t flags = spin_lock_irqsave(&priv->lock);
++  esp_hr_timer_stop_nolock(timer);
++  spin_unlock_irqrestore(&priv->lock, flags);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_delete
++ *
++ * Description:
++ *   Stop and delete the High Resolution Timer.
++ *
++ * Input Parameters:
++ *   timer         - HR Timer pointer.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void esp_hr_timer_delete(struct esp_hr_timer_s *timer)
++{
++  int ret;
++  irqstate_t flags;
++
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  flags = spin_lock_irqsave(&priv->lock);
++
++  if (timer->state == HR_TIMER_READY)
++    {
++      esp_hr_timer_stop_nolock(timer);
++    }
++  else if (timer->state == HR_TIMER_TIMEOUT)
++    {
++      list_delete(&timer->list);
++    }
++  else if (timer->state == HR_TIMER_DELETE)
++    {
++      spin_unlock_irqrestore(&priv->lock, flags);
++      return;
++    }
++
++  list_add_after(&priv->toutlist, &timer->list);
++  timer->state = HR_TIMER_DELETE;
++  spin_unlock_irqrestore(&priv->lock, flags);
++
++  /* Wake up the thread to process deleted timers */
++
++  ret = nxsem_post(&priv->toutsem);
++  if (ret < 0)
++    {
++      tmrerr("Failed to post sem ret=%d\n", ret);
++    }
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_time_us
++ *
++ * Description:
++ *   Get time of the High Resolution Timer in microseconds.
++ *
++ * Input Parameters:
++ *   None.
++ *
++ * Returned Value:
++ *   Time of the HR Timer in microseconds.
++ *
++ ****************************************************************************/
++
++uint64_t IRAM_ATTR esp_hr_timer_time_us(void)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  return systimer_hal_get_time(&priv->hal, SYSTIMER_COUNTER_ESPTIMER);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_get_alarm
++ *
++ * Description:
++ *   Get the timestamp when the next timeout is expected to occur.
++ *
++ * Input Parameters:
++ *   None.
++ *
++ * Returned Value:
++ *   Timestamp of the nearest timer event in microseconds.
++ *
++ ****************************************************************************/
++
++uint64_t IRAM_ATTR esp_hr_timer_get_alarm(void)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++  uint64_t counter;
++  uint64_t alarm_value;
++
++  irqstate_t flags = spin_lock_irqsave(&priv->lock);
++
++  counter = systimer_hal_get_time(&priv->hal, SYSTIMER_COUNTER_ESPTIMER);
++  alarm_value = systimer_hal_get_alarm_value(&priv->hal,
++                                             SYSTIMER_ALARM_ESPTIMER);
++  alarm_value = priv->hal.ticks_to_us(alarm_value);
++
++  if (alarm_value <= counter)
++    {
++      alarm_value = 0;
++    }
++  else
++    {
++      alarm_value -= counter;
++    }
++
++  spin_unlock_irqrestore(&priv->lock, flags);
++
++  return alarm_value;
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_calibration
++ *
++ * Description:
++ *   Adjust current High Resolution Timer by a certain value.
++ *
++ * Input Parameters:
++ *   time_us       - Adjustment to apply to the HR Timer in microseconds.
++ *
++ * Returned Value:
++ *   None.
++ *
++ ****************************************************************************/
++
++void IRAM_ATTR esp_hr_timer_calibration(uint64_t time_us)
++{
++  struct esp_hr_timer_context_s *priv = &g_hr_timer_context;
++
++  irqstate_t flags = spin_lock_irqsave(&priv->lock);
++  systimer_hal_counter_value_advance(&priv->hal, SYSTIMER_COUNTER_ESPTIMER,
++                                     time_us);
++  spin_unlock_irqrestore(&priv->lock, flags);
++}
++
++/****************************************************************************
++ * Name: esp_hr_timer_init
++ *
++ * Description:
++ *   Initialize High Resolution Timer.
++ *
++ * Input Parameters:
++ *   None.
++ *
++ * Returned Value:
++ *   Zero (OK) is returned on success; a negated errno value is returned on
++ *   any failure.
++ *
++ ****************************************************************************/
++
++int esp_hr_timer_init(void)
++{
++  struct esp_hr_timer_context_s *priv;
++  int pid;
++
++  if (g_hr_timer_initialized)
++    {
++      tmrinfo("HR Timer already initialized, skipping...\n");
++
++      return OK;
++    }
++
++  pid  = kthread_create(CONFIG_ESPRESSIF_HR_TIMER_TASK_NAME,
++                        CONFIG_ESPRESSIF_HR_TIMER_TASK_PRIORITY,
++                        CONFIG_ESPRESSIF_HR_TIMER_TASK_STACK_SIZE,
++                        esp_hr_timer_thread,
++                        NULL);
++  if (pid < 0)
++    {
++      tmrerr("Failed to create HR Timer task=%d\n", pid);
++
++      return pid;
++    }
++
++  priv = &g_hr_timer_context;
++
++  list_initialize(&priv->runlist);
++  list_initialize(&priv->toutlist);
++
++  priv->pid = (pid_t)pid;
++
++    {
++      irqstate_t flags = spin_lock_irqsave(&priv->lock);
++
++      periph_module_enable(PERIPH_SYSTIMER_MODULE);
++      systimer_hal_init(&priv->hal);
++      systimer_hal_tick_rate_ops_t ops =
++        {
++          .ticks_to_us = systimer_ticks_to_us,
++          .us_to_ticks = systimer_us_to_ticks,
++        };
++
++      systimer_hal_set_tick_rate_ops(&priv->hal, &ops);
++      systimer_ll_set_counter_value(priv->hal.dev,
++                                    SYSTIMER_COUNTER_ESPTIMER,
++                                    0);
++      systimer_ll_apply_counter_value(priv->hal.dev,
++                                      SYSTIMER_COUNTER_ESPTIMER);
++
++#if !SOC_SYSTIMER_FIXED_DIVIDER
++      ASSERT(esp_clk_xtal_freq() == (40 * 1000000));
++
++      systimer_hal_set_steps_per_tick(&priv->hal, 0, 2); /* For XTAL */
++      systimer_hal_set_steps_per_tick(&priv->hal, 1, 1); /* For PLL */
++#endif
++
++      systimer_hal_enable_alarm_int(&priv->hal, SYSTIMER_ALARM_ESPTIMER);
++      systimer_hal_enable_counter(&priv->hal, SYSTIMER_COUNTER_ESPTIMER);
++      systimer_hal_select_alarm_mode(&priv->hal, SYSTIMER_ALARM_ESPTIMER,
++                                     SYSTIMER_ALARM_MODE_ONESHOT);
++      systimer_hal_connect_alarm_counter(&priv->hal, SYSTIMER_ALARM_ESPTIMER,
++                                         SYSTIMER_COUNTER_ESPTIMER);
++
++      spin_unlock_irqrestore(&priv->lock, flags);
++    }
++
++  /* SILICONLOOP: 新版 esp_setup_irq 已合并 irq_attach，
++   * handler/arg 直接作为第 4、5 个参数传入。
++   */
++
++  esp_setup_irq(SYSTIMER_TARGET2_INTR_SOURCE,
++                ESP_IRQ_PRIORITY_DEFAULT,
++                SYSTIMER_TRIGGER_TYPE,
++                (xcpt_t)esp_hr_timer_isr, NULL);
++
++  /* Enable the allocated CPU interrupt */
++
++  up_enable_irq(ESP_IRQ_SYSTIMER_TARGET2);
++
++  g_hr_timer_initialized = true;
++
++  return OK;
++}
 diff --git a/arch/risc-v/src/esp32p4/esp_irq.c b/arch/risc-v/src/esp32p4/esp_irq.c
 new file mode 100644
 index 00000000000..71467c43921
@@ -6861,10 +8814,10 @@ index 00000000000..dd214508593
 +#endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_SPIFLASH_MTD_H */
 diff --git a/arch/risc-v/src/esp32p4/esp_start.c b/arch/risc-v/src/esp32p4/esp_start.c
 new file mode 100644
-index 00000000000..d60de2e2ff0
+index 00000000000..ba0f54238da
 --- /dev/null
 +++ b/arch/risc-v/src/esp32p4/esp_start.c
-@@ -0,0 +1,708 @@
+@@ -0,0 +1,745 @@
 +/****************************************************************************
 + * arch/risc-v/src/common/espressif/esp_start.c
 + *
@@ -7573,6 +9526,43 @@ index 00000000000..d60de2e2ff0
 +
 +  return old;
 +}
++
++/****************************************************************************
++ * Name: __atomic_fetch_and_8 / __atomic_load_8
++ *
++ * Description:
++ *   同 __atomic_fetch_or_8，由以太网驱动（esp_gpio_reserve.c）引入需求。
++ *   通过关中断保证操作不被打断，单核场景下等效于硬件原子操作。
++ ****************************************************************************/
++
++unsigned long long __atomic_fetch_and_8(volatile void *mem,
++                                        unsigned long long val, int model)
++{
++  irqstate_t flags;
++  unsigned long long old;
++  volatile unsigned long long *ptr = (volatile unsigned long long *)mem;
++
++  flags = enter_critical_section();
++  old = *ptr;
++  *ptr = old & val;
++  leave_critical_section(flags);
++
++  return old;
++}
++
++unsigned long long __atomic_load_8(const volatile void *mem, int model)
++{
++  irqstate_t flags;
++  unsigned long long val;
++  const volatile unsigned long long *ptr =
++    (const volatile unsigned long long *)mem;
++
++  flags = enter_critical_section();
++  val = *ptr;
++  leave_critical_section(flags);
++
++  return val;
++}
 diff --git a/arch/risc-v/src/esp32p4/esp_start.h b/arch/risc-v/src/esp32p4/esp_start.h
 new file mode 100644
 index 00000000000..9667207db76
@@ -7831,10 +9821,10 @@ index 00000000000..b0b0945cc07
 +}
 diff --git a/arch/risc-v/src/esp32p4/esp_usbserial.c b/arch/risc-v/src/esp32p4/esp_usbserial.c
 new file mode 100644
-index 00000000000..1b64a7cff80
+index 00000000000..a02ad3964e9
 --- /dev/null
 +++ b/arch/risc-v/src/esp32p4/esp_usbserial.c
-@@ -0,0 +1,483 @@
+@@ -0,0 +1,496 @@
 +/****************************************************************************
 + * arch/risc-v/src/common/espressif/esp_usbserial.c
 + *
@@ -8314,7 +10304,20 @@ index 00000000000..1b64a7cff80
 +
 +void esp_usbserial_write(char ch)
 +{
-+  while (!esp_txready(&g_uart_usbserial));
++  /* SILICONLOOP: 原实现为无限等待。USB Serial/JTAG 的发送 FIFO 仅 64 字节，
++   * 主机端未连接或未及时读取时缓冲区会写满，导致死循环并触发看门狗复位。
++   * 加入有限重试后，主机不在线时直接丢弃字符，系统继续启动。
++   */
++
++  uint32_t retries = 2000;
++
++  while (!esp_txready(&g_uart_usbserial))
++    {
++      if (--retries == 0)
++        {
++          return;
++        }
++    }
 +
 +  esp_send(&g_uart_usbserial, ch);
 +}
