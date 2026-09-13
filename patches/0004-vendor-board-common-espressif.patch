@@ -1,0 +1,27 @@
+Subject: [PATCH] vendor/openvela: build Espressif board common sources
+
+Apply to: vendor/openvela/   (patch -p1 -d <workspace>/vendor/openvela)
+
+boards/common/src/Makefile unconditionally built the QEMU board helpers
+(qemu_weakfunc.c, qemu_initialize.c), which do not exist for an Espressif
+target. arch/risc-v/src/board is symlinked to this directory, so the wrong
+sources were pulled into every build of the contest board.
+
+Include the board common Make.defs and add esp_board_spiflash.c when
+CONFIG_ESPRESSIF_SPIFLASH is enabled.
+
+Verified on ESP32-P4, openvela / NuttX 13.0.0.
+diff --git a/boards/common/src/Makefile b/boards/common/src/Makefile
+index dcc25de..6c362cc 100644
+--- a/boards/common/src/Makefile
++++ b/boards/common/src/Makefile
+@@ -18,4 +18,8 @@
+ #
+ ############################################################################
+ 
+-CSRCS += qemu_weakfunc.c qemu_initialize.c
++include $(BOARD_COMMON_DIR)/Make.defs
++
++ifeq ($(CONFIG_ESPRESSIF_SPIFLASH),y)
++CSRCS += esp_board_spiflash.c
++endif

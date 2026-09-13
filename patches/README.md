@@ -126,3 +126,104 @@ git apply ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-s
 格式化后可挂载、读写、重启后数据持久。
 
 详见 `03_04R_共同根因_MMU初始化PMP异常.md`。
+
+---
+
+# 0003-apps-mbedtls-header-priority.patch
+
+## 性质：构建修复，长期需要
+
+启用 `CONFIG_CRYPTO_MBEDTLS=y` 的 Espressif 目标都需要。
+本项目中即：只要开启 ai_agent，就必须打这个补丁。
+
+## 目标仓库
+
+`apps/`（repo 管理的公共仓库）
+
+## 解决的问题
+
+编译在依赖生成阶段失败，报 7 个 `#error`：
+
+apps/crypto/mbedtls/mbedtls/include/mbedtls/check_config.h:119:2:
+error: "MBEDTLS_ECJPAKE_C defined, but not all prerequisites"
+check_config.h:313: "MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED ..."
+check_config.h:322: "MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED ..."
+check_config.h:334: "MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED ..."
+check_config.h:341: "MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED ..."
+check_config.h:904: "MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT ..."
+check_config.h:1038: "MBEDTLS_SSL_CONTEXT_SERIALIZATION ..."
+
+
+触发文件为 esp-hal 的 `bootloader_support/src/bootloader_sha.c`。
+
+## 根因
+
+ESP-IDF（esp-hal-3rdparty）与 NuttX 各自带一份 mbedtls fork，
+两者的结构体布局与配置符号集合不同。
+
+`apps/crypto/mbedtls/Make.defs` 用 `${INCDIR_PREFIX}`（展开为 `-I`）
+加入 NuttX 那份的头文件路径，使其排在所有 `-I` 路径的最前面，
+对**每一个**编译单元生效，包括 esp-hal 自己的源文件。
+
+于是 esp-hal 的文件在 ESP-IDF 配置宏生效的情况下，
+命中了 NuttX 的 `check_config.h`，逐项校验全部不匹配。
+
+**注意**：这 7 项并非依赖缺失。`ECP_C` / `ECDH_C` / `ECDSA_C` /
+`SSL_PROTO_DTLS` 在 `.config` 中均为 `y`，问题纯粹是头文件串台。
+
+## 解法
+
+`-I` → `-isystem`。NuttX 那份仍可被找到，但优先级降到 ESP-IDF 之后，
+esp-hal 源文件转而命中自己那份。
+
+与上游脚本 `packages/ai_agent/fix_esp32s3.sh` 的 fix 1 做法一致
+（该脚本为 ESP32-S3 上跑 ai_agent 所写，说明这是 Espressif 平台的共性问题）。
+
+## 怎么用
+
+```bash
+cd <openvela 根目录>/apps
+git apply --check ../contest2026_330_neiheyoumuzhe/patches/0003-apps-mbedtls-header-priority.patch
+git apply ../contest2026_330_neiheyoumuzhe/patches/0003-apps-mbedtls-header-priority.patch
+```
+
+## 验证记录
+
+打补丁后，上述 7 个 `#error` 全部消失，编译阶段通过。
+ESP32-P4，openvela / NuttX 13.0.0，2026-09-13。
+
+---
+
+# 0004-vendor-board-common-espressif.patch
+
+## 性质：构建修复，长期需要
+
+## 目标仓库
+
+`vendor/openvela/`（repo 管理的公共仓库）
+
+## 解决的问题
+
+`boards/common/src/Makefile` 无条件编译 QEMU 板级辅助文件
+（`qemu_weakfunc.c`、`qemu_initialize.c`），这两个文件在 Espressif 目标上不存在。
+
+`arch/risc-v/src/board` 是指向该目录的符号链接，因此每次构建本赛题板子
+都会拉入错误的源文件。
+
+## 解法
+
+改为 include 板级公共 `Make.defs`，并在 `CONFIG_ESPRESSIF_SPIFLASH=y` 时
+加入 `esp_board_spiflash.c`。
+
+## 怎么用
+
+```bash
+cd <openvela 根目录>/vendor/openvela
+git apply --check ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-espressif.patch
+git apply ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-espressif.patch
+```
+
+## 验证记录
+
+ESP32-P4，openvela / NuttX 13.0.0。该改动自 2026-08-20 起持续生效，
+本项目所有成功构建均基于它。

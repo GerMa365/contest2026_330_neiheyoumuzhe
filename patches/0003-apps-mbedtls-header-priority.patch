@@ -1,0 +1,47 @@
+Subject: [PATCH] apps/crypto/mbedtls: lower NuttX mbedtls header priority
+
+Apply to: apps/   (patch -p1 -d <workspace>/apps)
+
+ESP-IDF (esp-hal-3rdparty) and NuttX each ship their own fork of mbedtls,
+and the two disagree on struct layouts and on which config symbols exist.
+apps/crypto/mbedtls/Make.defs adds the NuttX copy with -I, which places it
+ahead of the ESP-IDF include paths for every translation unit, including
+esp-hal sources.
+
+As a result, building esp-hal files such as bootloader_sha.c pulls in the
+NuttX check_config.h while the ESP-IDF config macros are in effect,
+producing 7 errors of the form:
+
+  error: "MBEDTLS_ECJPAKE_C defined, but not all prerequisites"
+  error: "MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED defined, but not all prerequisites"
+  ...
+
+Switching to -isystem keeps the NuttX headers reachable but places them
+after the ESP-IDF ones, so esp-hal sources resolve to their own copy.
+
+This mirrors fix 1 of the upstream script packages/ai_agent/fix_esp32s3.sh,
+which applies the same change for ESP32-S3.
+
+Required when CONFIG_CRYPTO_MBEDTLS=y on Espressif targets (i.e. whenever
+CONFIG_EXAMPLES_AI_AGENT_VELA is enabled).
+
+Verified on ESP32-P4, openvela / NuttX 13.0.0, 2026-09-13.
+diff --git a/crypto/mbedtls/Make.defs b/crypto/mbedtls/Make.defs
+index 3cb722d52..72dc8e4f5 100644
+--- a/crypto/mbedtls/Make.defs
++++ b/crypto/mbedtls/Make.defs
+@@ -23,10 +23,10 @@ CONFIGURED_APPS += $(APPDIR)/crypto/mbedtls
+ 
+ # Allows `<mbedtls/<>.h>` import.
+ 
+-CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/include
+-CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/mbedtls/include
++CFLAGS += -isystem $(APPDIR)/crypto/mbedtls/include
++CFLAGS += -isystem $(APPDIR)/crypto/mbedtls/mbedtls/include
+ 
+-CXXFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/include
+-CXXFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/mbedtls/include
++CXXFLAGS += -isystem $(APPDIR)/crypto/mbedtls/include
++CXXFLAGS += -isystem $(APPDIR)/crypto/mbedtls/mbedtls/include
+ 
+ endif
