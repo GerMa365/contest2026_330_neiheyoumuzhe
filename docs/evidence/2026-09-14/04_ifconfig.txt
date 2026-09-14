@@ -1,0 +1,6 @@
+nsh> ifconfig
+lo	Link encap:Local Loopback at RUNNING mtu 1518
+	inet addr:127.0.0.1 DRaddr:127.0.0.1 Mask:255.0.0.0
+
+eth0	Link encap:Ethernet HWaddr e8:f6:0a:e3:a9:37 at RUNNING mtu 576
+	inet addr:10.0.0.2 DRaddr:10.0.0.1 Mask:255.255.255.0

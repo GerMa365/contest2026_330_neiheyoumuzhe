@@ -58,7 +58,6 @@
  * 原型见 components/esp_timer/include/esp_timer.h:114
  */
 
-extern int esp_timer_init(void);
 
 volatile int g_sl_hrtimer_ret = 0xdead;
 volatile int g_sl_esptimer_ret = 0xdead;
@@ -87,22 +86,9 @@ int board_emac_init(void)
     }
 
 
-  /* SILICONLOOP: openvela 的 esp_hr_timer_init() 只初始化 NuttX 自己的
-   * SYSTIMER 封装，与 Apache NuttX 中同名函数（位于 esp_timer_adapter.c，
-   * 内部调用 esp_timer_init()）行为不同。esp_eth_driver_install() 依赖
-   * ESP-IDF 的 esp_timer 子系统，故此处显式初始化，否则
-   * esp_timer_create() 返回 ESP_ERR_INVALID_STATE (0x103)。
+  /* SILICONLOOP: esp_timer is no longer needed — the link-check timer in
+   * esp_eth.c now uses NuttX wdog instead (see patch 0005).
    */
-
-  {
-    int terr = esp_timer_init();
-    g_sl_esptimer_ret = terr;
-    if (terr != 0 && terr != 0x103)
-      {
-        nerr("ERROR: esp_timer_init failed: %d\n", terr);
-        return -EIO;
-      }
-  }
 
   ret = esp_emac_init();
   g_sl_espemac_ret = ret;

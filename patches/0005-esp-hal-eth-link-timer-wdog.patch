@@ -1,0 +1,140 @@
+Subject: [PATCH] esp-hal/esp_eth: use NuttX wdog for the link-check timer
+
+Apply to: nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty
+          (git apply from inside that directory)
+
+Baseline: 8d0a898910084206721a0892ab093021bca1496a
+          (matches ESP_HAL_3RDPARTY_VERSION in esp32p4/Make.defs)
+
+## Problem
+
+Enabling CONFIG_ESPRESSIF_EMAC on ESP32-P4 under openvela fails because
+esp_eth_driver_install() creates an esp_timer, and HAL's esp_timer needs
+SYSTIMER alarm 2 / TARGET2 — already owned by openvela's ESPRESSIF_HR_TIMER.
+Earlier attempts to move either side to another alarm did not work.
+
+## Observation
+
+esp_timer is used in esp_eth.c for exactly one purpose: periodically calling
+phy->get_link() to poll cable state. It is not on the data path. ESP-IDF's own
+header describes it as an "internal software timer (for checking link status)".
+
+## Fix
+
+Replace it with NuttX's wdog (a software timer running off the NuttX system
+clock, alarm 0 / TARGET0), which does not contend for SYSTIMER alarm 2:
+
+  - struct member: esp_timer_handle_t -> struct wdog_s (embedded, not a pointer)
+  - callback signature: void(void *) -> wdentry_t, i.e. void(wdparm_t)
+  - esp_timer_create()          -> wd_init()
+  - esp_timer_start_periodic()  -> wd_start() + re-arm inside the callback,
+                                   guarded by the driver FSM so it stops
+                                   re-arming after esp_eth_stop()
+  - esp_timer_stop/delete()     -> wd_cancel()
+
+## Known limitation
+
+NuttX runs wdog callbacks in timer-interrupt context (see nuttx/wdog.h), so
+phy->get_link() now runs under ISR restrictions. If this turns out to block,
+move the poll into a work queue (CONFIG_SCHED_LPWORK is already selected by
+ESPRESSIF_EMAC).
+
+Verified on ESP32-P4, openvela / NuttX 13.0.0, 2026-09-14.
+diff --git a/components/esp_eth/src/esp_eth.c b/components/esp_eth/src/esp_eth.c
+index 12f777e3f26..fe9da9eccd5 100644
+--- a/components/esp_eth/src/esp_eth.c
++++ b/components/esp_eth/src/esp_eth.c
+@@ -13,6 +13,8 @@
+ #include "esp_heap_caps.h"
+ #include "esp_timer.h"
+ #include "platform/os.h"
++#include <nuttx/wdog.h>
++#include <nuttx/clock.h>
+ 
+ #if CONFIG_ETH_TRANSMIT_MUTEX
+ /**
+@@ -44,7 +46,7 @@ typedef struct {
+     esp_eth_mediator_t mediator;
+     esp_eth_phy_t *phy;
+     esp_eth_mac_t *mac;
+-    esp_timer_handle_t check_link_timer;
++    struct wdog_s check_link_timer;
+     uint32_t check_link_period_ms;
+     bool auto_nego_en;
+     eth_speed_t speed;
+@@ -183,11 +185,18 @@ err:
+     return ret;
+ }
+ 
+-static void eth_check_link_timer_cb(void *args)
++static void eth_check_link_timer_cb(wdparm_t arg)
+ {
+-    esp_eth_driver_t *eth_driver = (esp_eth_driver_t *)args;
++    esp_eth_driver_t *eth_driver = (esp_eth_driver_t *)arg;
+     esp_eth_phy_t *phy = eth_driver->phy;
+     phy->get_link(phy);
++
++    /* wdog is one-shot; re-arm while the driver is running */
++    if (atomic_load(&eth_driver->fsm) == ESP_ETH_FSM_START) {
++        wd_start(&eth_driver->check_link_timer,
++                 MSEC2TICK(eth_driver->check_link_period_ms),
++                 eth_check_link_timer_cb, (wdparm_t)eth_driver);
++    }
+ }
+ 
+ ////////////////////////////////User face APIs////////////////////////////////////////////////
+@@ -209,13 +218,7 @@ esp_err_t esp_eth_driver_install(const esp_eth_config_t *config, esp_eth_handle_
+     // eth_driver contains an atomic variable, which should not be put in PSRAM
+     eth_driver = heap_caps_calloc(1, sizeof(esp_eth_driver_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+     ESP_GOTO_ON_FALSE(eth_driver, ESP_ERR_NO_MEM, err, TAG, "no mem for eth_driver");
+-    const esp_timer_create_args_t check_link_timer_args = {
+-        .callback = eth_check_link_timer_cb,
+-        .name = "eth_link_timer",
+-        .arg = eth_driver,
+-        .skip_unhandled_events = true
+-    };
+-    ESP_GOTO_ON_ERROR(esp_timer_create(&check_link_timer_args, &eth_driver->check_link_timer), err, TAG, "create link timer failed");
++    wd_init(&eth_driver->check_link_timer);
+ #if CONFIG_ETH_TRANSMIT_MUTEX
+     esp_os_create_mutex(&eth_driver->transmit_mutex);
+ #endif // CONFIG_ETH_TRANSMIT_MUTEX
+@@ -256,9 +259,7 @@ esp_err_t esp_eth_driver_install(const esp_eth_config_t *config, esp_eth_handle_
+     return ESP_OK;
+ err:
+     if (eth_driver) {
+-        if (eth_driver->check_link_timer) {
+-            esp_timer_delete(eth_driver->check_link_timer);
+-        }
++        wd_cancel(&eth_driver->check_link_timer);
+ #if CONFIG_ETH_TRANSMIT_MUTEX
+         if (eth_driver->transmit_mutex) {
+             esp_os_delete_mutex(&eth_driver->transmit_mutex);
+@@ -284,7 +285,7 @@ esp_err_t esp_eth_driver_uninstall(esp_eth_handle_t hdl)
+                       ESP_ERR_INVALID_STATE, err, TAG, "%d ethernet reference in use", expected_ref_count);
+     esp_eth_mac_t *mac = eth_driver->mac;
+     esp_eth_phy_t *phy = eth_driver->phy;
+-    ESP_GOTO_ON_ERROR(esp_timer_delete(eth_driver->check_link_timer), err, TAG, "delete link timer failed");
++    wd_cancel(&eth_driver->check_link_timer);
+ #if CONFIG_ETH_TRANSMIT_MUTEX
+     esp_os_delete_mutex(&eth_driver->transmit_mutex);
+ #endif // CONFIG_ETH_TRANSMIT_MUTEX
+@@ -312,7 +313,9 @@ esp_err_t esp_eth_start(esp_eth_handle_t hdl)
+     ESP_GOTO_ON_ERROR(esp_event_post(ETH_EVENT, ETHERNET_EVENT_START, &eth_driver, sizeof(esp_eth_driver_t *), 0),
+                       err, TAG, "send ETHERNET_EVENT_START event failed");
+     ESP_GOTO_ON_ERROR(phy->get_link(phy), err, TAG, "phy get link status failed");
+-    ESP_GOTO_ON_ERROR(esp_timer_start_periodic(eth_driver->check_link_timer, eth_driver->check_link_period_ms * 1000),
++    ESP_GOTO_ON_ERROR(wd_start(&eth_driver->check_link_timer,
++                               MSEC2TICK(eth_driver->check_link_period_ms),
++                               eth_check_link_timer_cb, (wdparm_t)eth_driver),
+                       err, TAG, "start link timer failed");
+ err:
+     return ret;
+@@ -328,7 +331,7 @@ esp_err_t esp_eth_stop(esp_eth_handle_t hdl)
+     esp_eth_fsm_t expected_fsm = ESP_ETH_FSM_START;
+     ESP_GOTO_ON_FALSE(atomic_compare_exchange_strong(&eth_driver->fsm, &expected_fsm, ESP_ETH_FSM_STOP),
+                       ESP_ERR_INVALID_STATE, err, TAG, "driver not started yet");
+-    ESP_GOTO_ON_ERROR(esp_timer_stop(eth_driver->check_link_timer), err, TAG, "stop link timer failed");
++    wd_cancel(&eth_driver->check_link_timer);
+ 
+     eth_link_t expected_link = ETH_LINK_UP;
+     if (atomic_compare_exchange_strong(&eth_driver->link, &expected_link, ETH_LINK_DOWN)){

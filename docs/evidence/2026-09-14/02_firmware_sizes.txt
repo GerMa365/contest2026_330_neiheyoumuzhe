@@ -1,0 +1,5 @@
+-rw-rw-r-- 1 w w 815080  9月 14 23:39 /home/w/Project/openvela/nuttx/nuttx.bin
+-rw-rw-r-- 1 w w 787252  9月 14 13:47 /tmp/nuttx.aiagent-emac-v1.bin
+-rw-rw-r-- 1 w w 786580  9月 13 16:18 /tmp/nuttx.aiagent-v1.bin
+-rw-rw-r-- 1 w w 304064  9月 13 14:56 /tmp/nuttx.baseline.bin
+-rw-rw-r-- 1 w w 810420  9月 14 23:18 /tmp/nuttx.emac-wdog-v1.bin
