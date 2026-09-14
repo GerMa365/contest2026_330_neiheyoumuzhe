@@ -800,7 +800,7 @@ index 00000000000..68ddf4b7a05
 +	default 0
 diff --git a/arch/risc-v/src/esp32p4/Make.defs b/arch/risc-v/src/esp32p4/Make.defs
 new file mode 100644
-index 00000000000..d373ca91cff
+index 00000000000..4be1a6f32ba
 --- /dev/null
 +++ b/arch/risc-v/src/esp32p4/Make.defs
 @@ -0,0 +1,66 @@
@@ -863,7 +863,7 @@ index 00000000000..d373ca91cff
 +# 已从 Apache NuttX 搬入 P4 专属目录，经 VPATH 就近优先机制编译。
 +
 +ifeq ($(CONFIG_ESPRESSIF_EMAC),y)
-+	CHIP_CSRCS += esp_emac.c
++CHIP_CSRCS += esp_emac.c
 +endif
 +
 +CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
