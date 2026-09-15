@@ -1,0 +1,88 @@
+diff --git a/src/agent_main.c b/src/agent_main.c
+index 9d676c2..611a8c9 100644
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -496,11 +496,11 @@ int ai_agent_main(int argc, char* argv[])
+     }
+ 
+     /* Ensure directory structure exists (No more manual mkdir needed!) */
+-    mkdir("/data/agent", 0755);
+-    mkdir("/data/agent/config", 0755);
+-    mkdir("/data/agent/memory", 0755);
+-    mkdir("/data/agent/sessions", 0755);
+-    mkdir("/data/agent/skills", 0755);
++    mkdir(AGENT_DATA_DIR, 0755);
++    mkdir(AGENT_DATA_DIR "/config", 0755);
++    mkdir(AGENT_DATA_DIR "/memory", 0755);
++    mkdir(AGENT_DATA_DIR "/sessions", 0755);
++    mkdir(AGENT_DATA_DIR "/skills", 0755);
+     BOOT_LOG(&t0, "P0", "storage ready");
+ 
+     /* Memory info */
+diff --git a/src/tools/skill_loader.c b/src/tools/skill_loader.c
+index ea21931..60c5a1b 100644
+--- a/src/tools/skill_loader.c
++++ b/src/tools/skill_loader.c
+@@ -117,8 +117,8 @@ static const char *TAG = "skills";
+     "When user asks about system status, health check, or running state.\n\n" \
+     "## How to use\n" \
+     "1. get_current_time to get current time\n" \
+-    "2. list_dir to list /data/agent/ files\n" \
+-    "3. read_file /data/agent/config/config.json to check config\n" \
++    "2. list_dir to list " AGENT_DATA_DIR "/ files\n" \
++    "3. read_file " AGENT_CONFIG_FILE " to check config\n" \
+     "4. cron_list to check scheduled tasks\n" \
+     "5. Summarize: time, file count, config status, cron jobs\n"
+ 
+diff --git a/src/tools/skill_sync.c b/src/tools/skill_sync.c
+index a0568aa..b6613b0 100644
+--- a/src/tools/skill_sync.c
++++ b/src/tools/skill_sync.c
+@@ -22,7 +22,7 @@
+  *   2. GET bitable records (enabled=true, paginated)
+  *   3. Filter by target_device
+  *   4. Compare version with local .versions.json
+- *   5. Write changed skills to /data/agent/skills/
++ *   5. Write changed skills to /data/ai_agent/skills/
+  *   6. Optionally clean orphaned local skills (full mode)
+  */
+ 
+diff --git a/src/tools/tool_files.c b/src/tools/tool_files.c
+index 3f07b7c..4571396 100644
+--- a/src/tools/tool_files.c
++++ b/src/tools/tool_files.c
+@@ -85,9 +85,9 @@ static bool validate_path(const char *path)
+ /* Files that the LLM must not overwrite via write_file / edit_file.
+  * These can only be modified through CLI or dedicated config commands. */
+ static const char *s_protected_files[] = {
+-    AGENT_CONFIG_FILE,   /* /data/agent/config/config.json */
+-    AGENT_SOUL_FILE,     /* /data/agent/config/SOUL.md     */
+-    AGENT_USER_FILE,     /* /data/agent/config/USER.md     */
++    AGENT_CONFIG_FILE,   /* /data/ai_agent/config/config.json */
++    AGENT_SOUL_FILE,     /* /data/ai_agent/config/SOUL.md     */
++    AGENT_USER_FILE,     /* /data/ai_agent/config/USER.md     */
+     NULL
+ };
+ 
+diff --git a/src/tools/tool_shell.c b/src/tools/tool_shell.c
+index 1acc875..8187e05 100644
+--- a/src/tools/tool_shell.c
++++ b/src/tools/tool_shell.c
+@@ -278,7 +278,7 @@ static int builtin_uname(char *output, size_t output_size)
+ 
+ /* Allowed path prefixes for file access (symlink escape protection) */
+ static const char *s_allowed_prefixes[] = {
+-    "/proc/", "/data/agent/", "/tmp/", NULL
++    "/proc/", AGENT_DATA_DIR "/", "/tmp/", NULL
+ };
+ 
+ static bool is_path_allowed(const char *path)
+@@ -372,7 +372,7 @@ static int builtin_ls(const char *path, char *output, size_t output_size)
+ {
+     /* Strip trailing slash for display, but keep for opendir */
+     char dir_buf[PATH_MAX];
+-    const char *dir = (path && path[0]) ? path : "/data/agent";
++    const char *dir = (path && path[0]) ? path : AGENT_DATA_DIR;
+ 
+     /* Normalise: remove trailing slash (except root "/") so path check works */
+     strncpy(dir_buf, dir, sizeof(dir_buf) - 1);

@@ -1,0 +1,63 @@
+diff --git a/src/tools/tool_registry.c b/src/tools/tool_registry.c
+index 33583e7..50b2b7c 100644
+--- a/src/tools/tool_registry.c
++++ b/src/tools/tool_registry.c
+@@ -47,6 +47,7 @@
+ #include "cJSON.h"
+ #include <pthread.h>
+ #include <string.h>
++#include <stdbool.h>
+ 
+ static const char* TAG = "tools";
+ 
+@@ -86,8 +87,50 @@ void tool_registry_register_provider(const char* name,
+     syslog(LOG_INFO, "[%s] Registered tool provider: %s\n", TAG, name);
+ }
+ 
++/* SiliconLoop: restrict the registered tool set.
++ *
++ * The stock build registers 36 tools. Their JSON schemas total ~10KB,
++ * which the agent sends on every LLM call. With ~98KB of free heap at
++ * agent start on ESP32-P4, that payload is silently dropped when
++ * memory is tight (request size falls from 14904 to 5923 bytes with no
++ * error logged), leaving the model unaware that run_shell exists and
++ * breaking the entire ReAct loop.
++ *
++ * Wearable, IM and media tools have no hardware backing on this board,
++ * so they are filtered out at registration time. Set the list to NULL
++ * to restore stock behaviour.
++ */
++static const char *const g_sl_tool_allow[] = {
++    "run_shell",
++    "read_file", "write_file", "edit_file", "list_dir",
++    "cron_add", "cron_list", "cron_remove",
++    "get_current_time", "fetch_url", "web_search",
++    NULL
++};
++
++static bool sl_tool_allowed(const char *name)
++{
++    int i;
++
++    if (name == NULL) {
++        return false;
++    }
++
++    for (i = 0; g_sl_tool_allow[i] != NULL; i++) {
++        if (strcmp(g_sl_tool_allow[i], name) == 0) {
++            return true;
++        }
++    }
++
++    return false;
++}
++
+ static void register_tool(const agent_tool_t* tool)
+ {
++    if (!sl_tool_allowed(tool->name)) {
++        return;
++    }
++
+     if (s_tool_count >= MAX_TOOLS) {
+         syslog(LOG_ERR, "[%s] Tool registry full\n", TAG);
+         return;

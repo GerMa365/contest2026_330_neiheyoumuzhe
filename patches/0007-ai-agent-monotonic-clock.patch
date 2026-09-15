@@ -1,0 +1,179 @@
+Subject: [PATCH] fix(agent_loop): use monotonic clock for elapsed time
+
+Problem
+-------
+On devices without an RTC the system clock starts at 1970. The TLS
+layer corrects it during the first handshake ("Clock too old, forcing
+to 2026"). When that correction lands between the two timestamps of an
+LLM call, calc_elapsed_ms() reports roughly 31 days. The watchdog
+(AGENT_LLM_TIMEOUT_SEC = 60) then treats the call as a timeout and
+discards a response that had already arrived successfully
+("Response: 284 bytes text, finish=end_turn").
+
+Root cause
+----------
+gettimeofday() reads CLOCK_REALTIME, which is subject to wall-clock
+adjustment. calc_elapsed_ms() already guards against the clock moving
+backwards but not against it jumping forward, which is exactly what
+happens on RTC-less hardware.
+
+Fix
+---
+Add mono_now(), which reads CLOCK_MONOTONIC and fills a struct
+timeval, and use it at all ten elapsed-time measurement points in
+agent_loop.c. Falls back to gettimeofday() if the monotonic clock is
+unavailable. calc_elapsed_ms() and every call site keep their
+existing signature.
+
+Reminder scheduling (time(NULL), lines 610/659) intentionally keeps
+the wall clock, as it needs the actual date.
+
+Verified on ESP32-P4 / openvela, no RTC configured.
+Additionally: do not cache timeout or degraded placeholders.
+
+The cache store only checked that final_text was non-NULL. On a
+failed call final_text holds LLM_TIMEOUT_MSG, so the error text was
+stored as the answer for that prompt. Every later identical prompt
+then returned the error straight from cache ("Cache hit, skipping
+LLM call") without reaching the network: one transient failure
+poisons the prompt permanently.
+
+A forced summary after hitting the tool iteration limit is likewise
+a degraded result (the code already marks it AGENT_TRACE_TIMEOUT)
+and is now excluded from the cache as well.
+
+diff --git a/src/core/agent_loop.c b/src/core/agent_loop.c
+index 3d9dec3..fa1ce49 100644
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -43,6 +43,7 @@
+ #include <string.h>
+ #include <strings.h>
+ #include <sys/time.h>
++#include <time.h>
+ 
+ #include "cJSON.h"
+ 
+@@ -67,6 +68,29 @@ static bool llm_call_timed_out(uint32_t latency_ms);
+ 
+ /* ── Clock-safe elapsed time calculation ───────────────────── */
+ 
++/* Monotonic clock source for elapsed-time measurement.
++ *
++ * gettimeofday() reads CLOCK_REALTIME, which jumps forward on devices
++ * without an RTC when TLS corrects the system time mid-call (1970 ->
++ * 2026). calc_elapsed_ms() then reports ~31 days and the LLM watchdog
++ * discards an otherwise successful response.
++ *
++ * CLOCK_MONOTONIC is unaffected by wall-clock adjustments. Falls back
++ * to gettimeofday() if the monotonic clock is unavailable.
++ */
++static inline void mono_now(struct timeval *tv)
++{
++    struct timespec ts;
++
++    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
++        tv->tv_sec  = ts.tv_sec;
++        tv->tv_usec = ts.tv_nsec / 1000;
++        return;
++    }
++
++    gettimeofday(tv, NULL);
++}
++
+ static inline uint32_t calc_elapsed_ms(const struct timeval* t0,
+     const struct timeval* t1)
+ {
+@@ -820,9 +844,9 @@ static char* force_finish_reply(const char* system_prompt,
+     llm_response_t resp;
+     char* result = NULL;
+     struct timeval t0, t1;
+-    gettimeofday(&t0, NULL);
++    mono_now(&t0);
+     int err = llm_chat_tools(system_prompt, messages, NULL, &resp);
+-    gettimeofday(&t1, NULL);
++    mono_now(&t1);
+     uint32_t ms = calc_elapsed_ms(&t0, &t1);
+     bool timed_out = llm_call_timed_out(ms);
+ 
+@@ -990,9 +1014,9 @@ static char* handle_task_complete(const char* sys_prompt, cJSON* messages,
+     llm_response_t final_resp;
+     char* result = NULL;
+     struct timeval t0, t1;
+-    gettimeofday(&t0, NULL);
++    mono_now(&t0);
+     int err = llm_chat_tools(sys_prompt, messages, NULL, &final_resp);
+-    gettimeofday(&t1, NULL);
++    mono_now(&t1);
+     uint32_t ms = calc_elapsed_ms(&t0, &t1);
+     bool timed_out = llm_call_timed_out(ms);
+ 
+@@ -1065,9 +1089,9 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+ 
+         llm_response_t resp;
+         struct timeval tv_start, tv_end;
+-        gettimeofday(&tv_start, NULL);
++        mono_now(&tv_start);
+         int err = llm_chat_tools(sys_prompt, messages, tools_json, &resp);
+-        gettimeofday(&tv_end, NULL);
++        mono_now(&tv_end);
+         uint32_t latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
+ 
+         /* Router failover: on LLM call failure, try next backend */
+@@ -1083,10 +1107,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+                 router_idx = next_idx;
+                 trace.backend_idx = next_idx;
+                 llm_response_free(&resp);
+-                gettimeofday(&tv_start, NULL);
++                mono_now(&tv_start);
+                 err = llm_chat_tools(sys_prompt, messages,
+                     tools_json, &resp);
+-                gettimeofday(&tv_end, NULL);
++                mono_now(&tv_end);
+                 latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
+             }
+         }
+@@ -1183,10 +1207,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+                     router_idx = prem_idx;
+                     trace.backend_idx = prem_idx;
+ 
+-                    gettimeofday(&tv_start, NULL);
++                    mono_now(&tv_start);
+                     err = llm_chat_tools(sys_prompt, messages,
+                         tools_json, &resp);
+-                    gettimeofday(&tv_end, NULL);
++                    mono_now(&tv_end);
+                     latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
+ 
+                     /* Watchdog check on cascade retry */
+@@ -1335,6 +1359,11 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+     if (!final_text && iteration >= AGENT_AI_AGENT_MAX_TOOL_ITER) {
+         final_text = force_finish_reply(sys_prompt, messages);
+         agent_trace_end(&trace, AGENT_TRACE_TIMEOUT);
++        /* SiliconLoop: a forced summary after hitting the tool
++         * iteration limit is a degraded result, not a real answer.
++         * Mark it so the cache store below skips it.
++         */
++        watchdog_fired = true;
+     } else if (watchdog_fired) {
+         agent_trace_end(&trace, AGENT_TRACE_TIMEOUT);
+     } else if (final_text) {
+@@ -1344,8 +1373,16 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+     }
+ 
+ send_reply:
+-    /* Cache store: save simple query responses for future reuse */
+-    if (final_text && msg->content
++    /* Cache store: save simple query responses for future reuse.
++     *
++     * SiliconLoop: never cache a timeout or degraded placeholder. On a
++     * failed call final_text holds LLM_TIMEOUT_MSG, and caching it
++     * makes every later identical prompt return the error straight
++     * from cache ("Cache hit, skipping LLM call") without ever
++     * reaching the network — one transient failure poisons the prompt
++     * permanently.
++     */
++    if (final_text && msg->content && !watchdog_fired
+         && complexity == LLM_COMPLEXITY_SIMPLE) {
+         llm_cache_put(msg->content, strlen(msg->content), final_text);
+         if (last_total_tokens > 0) {
