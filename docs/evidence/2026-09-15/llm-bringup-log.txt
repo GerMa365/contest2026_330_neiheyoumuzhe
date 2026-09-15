@@ -1,0 +1,100 @@
+# SiliconLoop LLM bring-up 证据记录
+# 日期: 2026-09-15
+# 板子: ESP32-P4 / openvela, 固件 nuttx.bin
+
+========================================
+【修复前】看门狗把成功的调用判成超时
+========================================
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=431
+[vela_tls] Clock too old, forcing to 2026
+[llm] Response: 284 bytes text, 0 tool calls, finish=end_turn
+[agent] LLM watchdog: call took 2748247548 ms (limit 60s), treating as timeout
+[trace:000001af00000000] iter=0 tool=(none) latency=2748247548ms llm=fail backend=0
+[trace:000001af00000000] END status=timeout iters=1 tools=0 llm_ms=2748247548
+[Agent]: 请求超时，LLM 响应时间过长。请稍后重试，或尝试简化你的问题。
+
+# 说明: 服务器已返回 284 字节真实回答 (finish=end_turn)，
+# 但 gettimeofday 取墙上时钟，TLS 中途把时间从 1970 拨到 2026，
+# 相减得 2748247548 ms (约 31.8 天)，超过 60 秒上限被丢弃。
+
+========================================
+【修复前】错误响应被写入缓存
+========================================
+[agent] Cache hit, skipping LLM call
+[trace:69a2c60a35c3b13a] iter=0 tool=(none) latency=0ms llm=ok backend=0
+[Agent]: 请求超时，LLM 响应时间过长。请稍后重试，或尝试简化你的问题。
+
+# 说明: 超时文案被当作该提示词的标准答案缓存，
+# 后续相同提问直接命中缓存返回错误，不再联网。
+
+========================================
+【修复前】工具定义被静默丢弃
+========================================
+[agent] Agent loop started, free heap: 165520
+[tools] Tools JSON built (36 builtin + 0 providers)
+[agent] Tools JSON loaded: 9985 bytes
+
+内存充足时: [llm] OpenAI API with tools (model: mimo-v2.5, 14904 bytes)
+内存紧张时: [llm] OpenAI API with tools (model: mimo-v2.5, 5923 bytes)
+
+# 说明: 差值 8981 字节约等于 Tools JSON 的 9985 字节。
+# 内存不足时工具定义被整块丢弃且不报错，LLM 因此不知道 run_shell 存在。
+
+========================================
+【修复前】CLI 超长命令被整行丢弃
+========================================
+vela> set_llm token-plan-cn.xiaomimimo.com mimo-v2.5 tp-xxxxxxxx
+Unknown command: (type 'help')
+
+# 说明: 该命令 89 字符，超过 CONFIG_NSH_LINELEN=80，
+# 整行作废且命令名都未解析出来。55 字符的命令则正常。
+
+========================================
+【修复后】2026-09-15 22:24 固件
+========================================
+[tools] Registered tool: web_search
+[tools] Registered tool: get_current_time
+[tools] Registered tool: read_file
+[tools] Registered tool: write_file
+[tools] Registered tool: edit_file
+[tools] Registered tool: list_dir
+[tools] Registered tool: cron_add
+[tools] Registered tool: cron_list
+[tools] Registered tool: cron_remove
+[tools] Registered tool: fetch_url
+[tools] Registered tool: run_shell
+[tools] Tools JSON built (11 builtin + 0 providers)
+[agent] Agent loop started, free heap: 172184
+[agent] Tools JSON loaded: 3437 bytes
+
+vela> set_llm https://token-plan-cn.xiaomimimo.com/v1 mimo-v2.5 tp-xxxxxxxx
+[llm_router] Backend 0 configured: token-plan-cn.xiaomimimo.com
+API key saved.
+# (该命令 100 字符，修复前必失败)
+
+vela> ask 你好
+[llm] OpenAI API with tools (model: mimo-v2.5, 7254 bytes)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=44
+[vela_tls] Clock too old, forcing to 2026
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 113 bytes text, 0 tool calls, finish=end_turn
+[trace:0000002c00000000] iter=0 tool=(none) latency=3430ms llm=ok backend=0
+[trace:0000002c00000000] END status=ok iters=1 tools=0 llm_ms=3430
+[Agent]: 你好！我是 AI Agent，运行在 Vela 嵌入式设备上的智能助手。
+
+# 说明: 时钟拨表照常发生，但耗时为真实的 3430 ms，状态 ok。
+
+========================================
+对比汇总
+========================================
+项目                  修复前              修复后
+注册工具数            36                  11
+Tools JSON            9985 字节           3437 字节
+请求体积              14904 字节          7254 字节
+agent 启动后空闲堆    165520              172184
+CLI 命令长度上限      80 字符             512 字符
+耗时计算              2748247548 ms       3430 ms
+调用结果              status=timeout      status=ok
+
+对应补丁: 0007 (单调时钟+缓存)、0008 (工具白名单)、0009 (数据目录宏)
+配置改动: CONFIG_NSH_LINELEN 80 -> 512
