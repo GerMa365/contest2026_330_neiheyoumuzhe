@@ -1,0 +1,108 @@
+diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
+index 0b36760..3b8cc13 100644
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -306,6 +306,20 @@ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+ #endif
+         setsockopt(ctx->net.fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+ 
++        /* SiliconLoop: a send timeout is mandatory, not optional.
++         * Without SO_SNDTIMEO any blocking write on a half-dead
++         * connection hangs forever. tls_ctx_free() calls
++         * mbedtls_ssl_close_notify() as its first action, so tearing
++         * down a stale pooled connection deadlocks the agent loop
++         * before it can even start reconnecting.
++         */
++        {
++            struct timeval stv = { .tv_sec = AGENT_TLS_SEND_TIMEOUT_SEC,
++                .tv_usec = 0 };
++            setsockopt(ctx->net.fd, SOL_SOCKET, SO_SNDTIMEO,
++                &stv, sizeof(stv));
++        }
++
+ #ifdef CONFIG_AI_AGENT_NET_RPMSG
+         {
+             int timeout_sec = network_get_connect_timeout();
+@@ -524,6 +538,54 @@ static void tls_raw_release(char* buf)
+     }
+ }
+ 
++/* Parse an HTTP-date (RFC 7231 IMF-fixdate) into a time_t.
++ * Example: "Wed, 16 Sep 2026 11:15:20 GMT"
++ *
++ * strptime() is declared on this platform but not linked in, so the
++ * fixed-width format is parsed directly. Returns 0 on failure.
++ */
++static time_t parse_http_date(const char* s)
++{
++    static const char months[] =
++        "JanFebMarAprMayJunJulAugSepOctNovDec";
++    char mon[4] = { 0 };
++    struct tm tm;
++    int day, year, hour, min, sec;
++
++    while (*s == ' ') {
++        s++;
++    }
++
++    /* Skip the weekday and its comma: "Wed, " */
++    const char* comma = strchr(s, ',');
++    if (comma) {
++        s = comma + 1;
++        while (*s == ' ') {
++            s++;
++        }
++    }
++
++    if (sscanf(s, "%d %3s %d %d:%d:%d",
++            &day, mon, &year, &hour, &min, &sec) != 6) {
++        return 0;
++    }
++
++    const char* p = strstr(months, mon);
++    if (!p) {
++        return 0;
++    }
++
++    memset(&tm, 0, sizeof(tm));
++    tm.tm_mday = day;
++    tm.tm_mon = (int)(p - months) / 3;
++    tm.tm_year = year - 1900;
++    tm.tm_hour = hour;
++    tm.tm_min = min;
++    tm.tm_sec = sec;
++
++    return timegm(&tm);
++}
++
+ static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
+     size_t* out_body_len, bool* out_keep_alive)
+ {
+@@ -579,6 +641,27 @@ static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
+     }
+     body_start += 4; /* skip double CRLF */
+ 
++    /* SiliconLoop: take the wall clock from the server's Date header.
++     * This board has no RTC, so time starts at 1970 and every evidence
++     * file, cron schedule and get_current_time result is wrong. The
++     * response header carries an accurate UTC timestamp on every call,
++     * so no extra round trip or NTP client is needed.
++     */
++    {
++        char* date_hdr = strcasestr(raw, "\r\nDate:");
++        if (date_hdr && date_hdr < body_start) {
++            time_t srv = parse_http_date(date_hdr + 7);
++            time_t now = time(NULL);
++            if (srv > 0 && (now < srv - 60 || now > srv + 60)) {
++                struct timespec ts = { .tv_sec = srv, .tv_nsec = 0 };
++                clock_settime(CLOCK_REALTIME, &ts);
++                syslog(LOG_INFO,
++                    "[%s] Clock synced from HTTP Date: %ld\n",
++                    TAG, (long)srv);
++            }
++        }
++    }
++
+     /* Extract content-length if present */
+     long content_length = -1;
+     {
