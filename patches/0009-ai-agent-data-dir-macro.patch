@@ -1,8 +1,16 @@
 diff --git a/src/agent_main.c b/src/agent_main.c
-index 9d676c2..611a8c9 100644
+index 9d676c2..5b7b09c 100644
 --- a/src/agent_main.c
 +++ b/src/agent_main.c
-@@ -496,11 +496,11 @@ int ai_agent_main(int argc, char* argv[])
+@@ -38,6 +38,7 @@
+ #include "core/message_bus.h"
+ #include "core/message_bus_tap.h"
+ #include "channels/nsh_commands.h"
++#include "channels/cmd_llm.h"
+ #include "infra/config_store.h"
+ #include "infra/cron_service.h"
+ #ifdef CONFIG_AI_AGENT_FEISHU
+@@ -496,11 +497,12 @@ int ai_agent_main(int argc, char* argv[])
      }
  
      /* Ensure directory structure exists (No more manual mkdir needed!) */
@@ -16,14 +24,70 @@ index 9d676c2..611a8c9 100644
 +    mkdir(AGENT_DATA_DIR "/memory", 0755);
 +    mkdir(AGENT_DATA_DIR "/sessions", 0755);
 +    mkdir(AGENT_DATA_DIR "/skills", 0755);
++    mkdir(AGENT_DATA_DIR "/evidence", 0755);
      BOOT_LOG(&t0, "P0", "storage ready");
  
      /* Memory info */
+@@ -548,6 +550,21 @@ int ai_agent_main(int argc, char* argv[])
+         rc = llm_router_init();
+         BOOT_LOG_RC(&t0, "P3", "llm_router_init", rc);
+ 
++        /* SiliconLoop: bootstrap the LLM backend from build-time
++         * secrets. /data is tmpfs on this board, so config.json is
++         * empty on every boot and the router starts with zero
++         * backends. Unattended operation (cron-driven diagnosis)
++         * cannot wait for a human to type set_llm.
++         */
++        if (AGENT_SECRET_LLM_URL[0] && AGENT_SECRET_API_KEY[0]) {
++            char* av[] = { (char*)"set_llm",
++                (char*)AGENT_SECRET_LLM_URL,
++                (char*)AGENT_SECRET_MODEL,
++                (char*)AGENT_SECRET_API_KEY };
++            cmd_set_llm(4, av);
++            BOOT_LOG(&t0, "P3", "llm bootstrap from secrets");
++        }
++
+         /* node_manager must init BEFORE tool_registry so it can
+          * register itself as a tool provider. */
+ #ifdef CONFIG_AI_AGENT_NODE
 diff --git a/src/tools/skill_loader.c b/src/tools/skill_loader.c
-index ea21931..60c5a1b 100644
+index ea21931..4816a55 100644
 --- a/src/tools/skill_loader.c
 +++ b/src/tools/skill_loader.c
-@@ -117,8 +117,8 @@ static const char *TAG = "skills";
+@@ -110,6 +110,32 @@ static const char *TAG = "skills";
+     "2. Translate directly using your language knowledge\\n" \
+     "3. For specialized terms, use web_search to verify\\n\"\n"
+ 
++#define BUILTIN_SELF_DIAGNOSTIC \
++    "# Embedded Self-Diagnostic\n\n" \
++    "Structured hardware-level diagnosis for openvela devices.\n\n" \
++    "## When to use\n" \
++    "When the user asks to diagnose the device, check system health, " \
++    "reports a hang, or suspects a stuck task.\n\n" \
++    "## How to use\n" \
++    "1. run_shell \"ps\" - every task and its state\n" \
++    "2. run_shell \"free\" - heap total, used, free\n" \
++    "3. write_file the report to " AGENT_DATA_DIR "/evidence/report.md\n\n" \
++    "## Output format\n" \
++    "Answer in exactly these four sections. Never omit one.\n\n" \
++    "Maximum 3 sentences per section. Be concise.\n\n" \
++    "**Observed Evidence**\n" \
++    "Only what the commands actually printed. No interpretation.\n\n" \
++    "**Hypothesis**\n" \
++    "What you infer. Say which part is observation, which is inference.\n\n" \
++    "**Confidence**\n" \
++    "High, medium or low, with the reason for that rating.\n\n" \
++    "**Proposed Test or Fix**\n" \
++    "A concrete next step. Not a vague suggestion.\n\n" \
++    "## Rules\n" \
++    "- Call exactly one tool per step. Never batch tool calls.\n" \
++    "- Never invent command output. Report failures as failures.\n" \
++    "- When confidence is low, propose an experiment, not a fix.\n"
++
+ #define BUILTIN_SYSTEM_HEALTH \
+     "# System Health Check\n\n" \
+     "Check AI Agent system status and summarize key info.\n\n" \
+@@ -117,8 +143,8 @@ static const char *TAG = "skills";
      "When user asks about system status, health check, or running state.\n\n" \
      "## How to use\n" \
      "1. get_current_time to get current time\n" \
@@ -34,6 +98,14 @@ index ea21931..60c5a1b 100644
      "4. cron_list to check scheduled tasks\n" \
      "5. Summarize: time, file count, config status, cron jobs\n"
  
+@@ -212,6 +238,7 @@ static const builtin_skill_t s_builtins[] = {
+     { "news-digest",    BUILTIN_NEWS_DIGEST    },
+     { "feishu-test",    BUILTIN_FEISHU_TEST    },
+     { "task-manager",   BUILTIN_TASK_MANAGER   },
++    { "self-diagnostic", BUILTIN_SELF_DIAGNOSTIC },
+ };
+ 
+ #define NUM_BUILTINS (sizeof(s_builtins) / sizeof(s_builtins[0]))
 diff --git a/src/tools/skill_sync.c b/src/tools/skill_sync.c
 index a0568aa..b6613b0 100644
 --- a/src/tools/skill_sync.c

@@ -1,0 +1,64 @@
+diff --git a/.gitignore b/.gitignore
+index 06e47a5..1fc9bfb 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -50,3 +50,4 @@ logs/*
+ 
+ # Kconfig backup
+ Kconfig.orig
++include/agent_secrets.h
+diff --git a/include/agent_config.h b/include/agent_config.h
+index 711bb6d..8b567c8 100644
+--- a/include/agent_config.h
++++ b/include/agent_config.h
+@@ -53,6 +53,9 @@
+ #ifndef AGENT_SECRET_MODEL
+ #define AGENT_SECRET_MODEL ""
+ #endif
++#ifndef AGENT_SECRET_LLM_URL
++#define AGENT_SECRET_LLM_URL ""
++#endif
+ #ifndef AGENT_SECRET_PROXY_HOST
+ #define AGENT_SECRET_PROXY_HOST ""
+ #endif
+@@ -105,9 +108,9 @@
+ #define AGENT_AI_AGENT_STACK (32 * 1024)
+ #define AGENT_AI_AGENT_PRIO 60
+ #define AGENT_AI_AGENT_CORE 0
+-#define AGENT_AI_AGENT_MAX_HISTORY 10
++#define AGENT_AI_AGENT_MAX_HISTORY 4
+ #define AGENT_AI_AGENT_MAX_TOOL_ITER 10
+-#define AGENT_MAX_TOOL_CALLS 2
++#define AGENT_MAX_TOOL_CALLS 1
+ #define AGENT_TOOL_NAME_REPEAT_MAX 4
+ 
+ /* ── LLM Watchdog ──────────────────────────────────────────── */
+@@ -116,13 +119,13 @@
+  * a timeout and replies with a user-friendly error message.
+  * The socket-level SO_RCVTIMEO (AGENT_LLM_SOCKET_TIMEOUT_SEC)
+  * acts as the hard backstop that actually unblocks the read. */
+-#define AGENT_LLM_TIMEOUT_SEC 60
++#define AGENT_LLM_TIMEOUT_SEC 180
+ 
+ /* Socket-level read timeout applied via SO_RCVTIMEO in vela_tls.
+  * Must be >= AGENT_LLM_TIMEOUT_SEC to allow the agent-level
+  * watchdog to fire first on normal slow responses.  Set higher
+  * to cover TLS handshake + full response read. */
+-#define AGENT_LLM_SOCKET_TIMEOUT_SEC 120
++#define AGENT_LLM_SOCKET_TIMEOUT_SEC 240
+ 
+ /* ── Timezone (POSIX TZ format) ────────────────────────────── */
+ #define AGENT_TIMEZONE "CST-8"
+diff --git a/src/llm/llm_proxy.c b/src/llm/llm_proxy.c
+index 48157cc..58c6e40 100644
+--- a/src/llm/llm_proxy.c
++++ b/src/llm/llm_proxy.c
+@@ -735,6 +735,8 @@ int llm_chat_tools(const char* system_prompt, cJSON* messages,
+ 
+     cJSON_Delete(body);
+     if (!post_data) {
++        syslog(LOG_ERR,
++            "[%s] OOM: failed to serialize request body\n", TAG);
+         return ERROR;
+     }
+ 
