@@ -1,8 +1,61 @@
 diff --git a/src/infra/vela_tls.c b/src/infra/vela_tls.c
-index 0b36760..3b8cc13 100644
+index 0b36760..121672b 100644
 --- a/src/infra/vela_tls.c
 +++ b/src/infra/vela_tls.c
-@@ -306,6 +306,20 @@ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+@@ -150,8 +150,24 @@ typedef struct {
+     char port[8];
+     bool in_use; /* locked by a request */
+     bool valid; /* connection is alive */
++    time_t last_used; /* CLOCK_MONOTONIC seconds, for idle expiry */
+ } conn_slot_t;
+ 
++/* SiliconLoop: monotonic seconds. The wall clock jumps from 1970 to
++ * the real date on the first TLS handshake of a board without an RTC,
++ * so idle time must not be measured with time(NULL).
++ */
++static time_t pool_now(void)
++{
++    struct timespec ts;
++
++    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
++        return ts.tv_sec;
++    }
++
++    return time(NULL);
++}
++
+ static conn_slot_t s_pool[CONN_POOL_SIZE];
+ static pthread_mutex_t s_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
+@@ -164,6 +180,19 @@ static conn_slot_t* pool_acquire(const char* host, const char* port)
+     for (int i = 0; i < CONN_POOL_SIZE; i++) {
+         conn_slot_t* s = &s_pool[i];
+         if (s->valid && !s->in_use && strcmp(s->host, host) == 0 && strcmp(s->port, port) == 0) {
++            /* SiliconLoop: drop connections idle past the server's
++             * keep-alive window. The drain probe below only detects a
++             * peer that sent close_notify; a server that dropped the
++             * connection silently is not detected, and the request
++             * then stalls in TCP retransmission for ~100 seconds.
++             */
++            if (pool_now() - s->last_used > AGENT_TLS_POOL_MAX_IDLE_SEC) {
++                tls_ctx_free(&s->ctx);
++                s->valid = false;
++                s->in_use = true;
++                pthread_mutex_unlock(&s_pool_lock);
++                return s;
++            }
+             s->in_use = true;
+             pthread_mutex_unlock(&s_pool_lock);
+             return s;
+@@ -202,6 +231,7 @@ static void pool_release(conn_slot_t* s, const char* host, const char* port, boo
+         strncpy(s->host, host, sizeof(s->host) - 1);
+         strncpy(s->port, port, sizeof(s->port) - 1);
+         s->valid = true;
++        s->last_used = pool_now();
+     } else {
+         tls_ctx_free(&s->ctx);
+         s->valid = false;
+@@ -306,6 +336,20 @@ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
  #endif
          setsockopt(ctx->net.fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
  
@@ -23,7 +76,7 @@ index 0b36760..3b8cc13 100644
  #ifdef CONFIG_AI_AGENT_NET_RPMSG
          {
              int timeout_sec = network_get_connect_timeout();
-@@ -524,6 +538,54 @@ static void tls_raw_release(char* buf)
+@@ -524,6 +568,54 @@ static void tls_raw_release(char* buf)
      }
  }
  
@@ -78,7 +131,7 @@ index 0b36760..3b8cc13 100644
  static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
      size_t* out_body_len, bool* out_keep_alive)
  {
-@@ -579,6 +641,27 @@ static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
+@@ -579,6 +671,27 @@ static int tls_read_response(tls_ctx_t* ctx, char* resp_buf, size_t resp_cap,
      }
      body_start += 4; /* skip double CRLF */
  
