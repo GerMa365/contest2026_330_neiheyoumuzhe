@@ -227,3 +227,120 @@ git apply ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-e
 
 ESP32-P4，openvela / NuttX 13.0.0。该改动自 2026-08-20 起持续生效，
 本项目所有成功构建均基于它。
+
+---
+
+# 0013-esp32p4-pmp-allow-execute-from-heap.patch
+
+## 性质：平台能力补充，长期需要
+
+任何想在 ESP32-P4 上使用 NuttX ELF 动态加载的项目都需要。
+
+## 目标仓库
+
+`nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty`
+
+- 基线提交：`8d0a898910084206721a0892ab093021bca1496a`
+
+## 解决的问题
+
+加载 ELF 模块后，在其入口点触发异常：
+
+    riscv_exception: EXCEPTION: Instruction access fault.
+    MCAUSE: 00000001, EPC: 4ff72840, MTVAL: 4ff72840
+
+此前的每一步都正常：romfs 挂载、ELF 解析、段加载、符号绑定、
+数十次重定位写入全部成功，任务也创建了。只有第一条指令取不出来。
+
+## 根因
+
+`esp-hal` 的 `sdkconfig.h` 硬编码了 `CONFIG_ESP_SYSTEM_MEMPROT=1`
+（NuttX 的 `.config` 中查不到此项，因此容易漏看），使
+`cpu_region_protect.c` 以 `_iram_text_end` 为界把 SRAM 切成两段：
+
+| 范围 | PMP 权限 |
+|---|---|
+| 0x4ff00000 ~ _iram_text_end | R X |
+| _iram_text_end ~ 0x4ffc0000 | R W（无 X） |
+
+堆位于第二段。ELF 模块的代码被加载到堆上，因此可写不可执行。
+两条规则均带 L（lock）位，机器模式同样受限，且复位前无法修改。
+
+板上读取 PMP 寄存器确认：
+
+    PMP05 cfg=8d R1 W0 X1 TOR L1 top=4ff49500
+    PMP06 cfg=8b R1 W1 X0 TOR L1 top=4ffc0000
+
+失败的入口地址 0x4ff72840 落在 PMP06 内。
+
+## 解法
+
+PMP entry 6 与 9（非缓存别名）由 `RW` 改为 `RWX`。
+IRAM/DRAM 的划分保留，固件代码段仍为不可写。
+
+## 局限
+
+数据区变为可执行，牺牲了一部分不可执行内存的防护。
+正规方案是实现 `up_textheap_memalign()` 划出专用可执行区，
+该移植尚未提供这一支持。
+
+## 验证记录
+
+应用后异常码由 1（取指被拒）变为 2（指令无效）——权限一层已通过，
+暴露出下一层问题，见 0014。两者同时应用后 `elf` 示例的七个测试
+全部通过。
+
+---
+
+# 0014-binfmt-elf-sync-icache-after-relocation.patch
+
+## 性质：缺陷修复，长期需要
+
+影响所有指令缓存与数据缓存不自动一致的 RISC-V 目标。
+
+## 目标仓库
+
+`nuttx/`
+
+- 基线提交：`dd92bcf425738734d1b8aed09c2bd4dbe3f2e438`
+
+## 解决的问题
+
+解决 0013 后，异常变为：
+
+    riscv_exception: EXCEPTION: Illegal instruction.
+    MCAUSE: 00000002, EPC: 4ff72980, MTVAL: 00000000
+
+## 根因
+
+模块代码是经数据通路写入的——每一次重定位都是一条普通 store。
+取指走另一条通路，而 ESP32-P4 的内部内存经 L1 缓存访问
+（`SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE=1`）且为写回模式，
+重定位后的代码仍留在数据缓存中，取指侧从内存读到的是旧字节。
+
+定位方式：在跳转前打印 `textalloc` 处的前 16 字节，与主机上
+`objdump` 的结果逐字节比对，完全一致（含正确的 auipc 重定位结果）。
+即内存内容无误，问题只可能在取指路径。
+
+`fence.i` 单独不足——它排序的是访存与取指，不负责把写回缓存刷出。
+实测仅加 `fence.i` 仍然复现。
+
+## 解法
+
+重定位完成后，对代码段执行缓存写回 + 失效：
+
+    cache_hal_writeback_addr(textalloc, textsize);
+    cache_hal_invalidate_addr(textalloc, textsize);
+
+## 局限
+
+`binfmt/` 无法包含厂商 HAL 头文件，函数原型在调用处就地声明。
+正规方案是实现 `up_clean_dcache()` / `up_invalidate_icache()`，
+该移植尚未提供。
+
+## 验证记录
+
+`elf` 示例七个测试全部通过：errno、hello、signal、struct、mutex、
+pthread、task，含模块内再次 exec。每个测试结束后内存收支归零。
+
+日志见 `docs/evidence/2026-09-18/elf-loading-7tests-pass.log`。

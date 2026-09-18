@@ -1,0 +1,26 @@
+--- a/arch/risc-v/src/esp32p4/esp-hal-3rdparty/components/esp_hw_support/port/esp32p4/cpu_region_protect.c
++++ b/arch/risc-v/src/esp32p4/esp-hal-3rdparty/components/esp_hw_support/port/esp32p4/cpu_region_protect.c
+@@ -138,7 +138,13 @@
+ 
+         PMP_ENTRY_SET_CACHED_AND_UNCACHED(4, 7, SOC_IRAM_LOW, NONE);
+         PMP_ENTRY_SET_CACHED_AND_UNCACHED(5, 8, (int)&_iram_text_end, PMP_TOR | RX);
+-        PMP_ENTRY_SET_CACHED_AND_UNCACHED(6, 9, SOC_DRAM_HIGH, PMP_TOR | RW);
++        /* SiliconLoop: RW -> RWX. An ELF module is loaded into the heap,
++         * which lives in this region; with X cleared the module faults
++         * with MCAUSE=1 on its first instruction. Verified against the
++         * PMP registers on the board. The IRAM/DRAM split is otherwise
++         * preserved, so firmware text stays non-writable.
++         */
++        PMP_ENTRY_SET_CACHED_AND_UNCACHED(6, 9, SOC_DRAM_HIGH, PMP_TOR | RWX);
+ #else
+         PMP_ENTRY_SET_CACHED_AND_UNCACHED(4, 6, SOC_IRAM_LOW, CONDITIONAL_NONE);
+         PMP_ENTRY_SET_CACHED_AND_UNCACHED(5, 7, SOC_IRAM_HIGH, PMP_TOR | CONDITIONAL_RWX);
+@@ -275,7 +281,7 @@
+         PMP_ENTRY_CFG_RESET(5);
+         PMP_ENTRY_SET(3, SOC_IRAM_LOW, NONE);
+         PMP_ENTRY_SET(4, (int)&_iram_text_end, PMP_TOR | RX);
+-        PMP_ENTRY_SET(5, SOC_DRAM_HIGH, PMP_TOR | RW);
++        PMP_ENTRY_SET(5, SOC_DRAM_HIGH, PMP_TOR | RWX);
+ #else
+         // 4. IRAM and DRAM
+         PMP_ENTRY_SET(3, SOC_IRAM_LOW, CONDITIONAL_NONE);

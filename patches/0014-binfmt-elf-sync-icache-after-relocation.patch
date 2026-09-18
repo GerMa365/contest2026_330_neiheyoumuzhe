@@ -1,0 +1,48 @@
+--- a/binfmt/elf.c
++++ b/binfmt/elf.c
+@@ -136,6 +136,45 @@
+           goto errout_with_load;
+         }
+ 
++#ifdef CONFIG_ARCH_RISCV
++      /* SiliconLoop: the module's text arrives through the data path —
++       * every relocation above is an ordinary store. Instruction
++       * fetches use a separate path, and on cores where internal
++       * memory is cached (ESP32-P4 routes it through L1) the freshly
++       * written text is not yet visible to the fetch side. The first
++       * instruction at the entry point then decodes stale bytes and
++       * traps with MCAUSE=2, illegal instruction.
++       *
++       * fence.i is the RISC-V barrier for precisely this ordering:
++       * it makes prior stores visible to subsequent instruction
++       * fetches on this hart.
++       */
++
++      __asm__ __volatile__ ("fence.i" ::: "memory");
++
++      /* SiliconLoop: fence.i is not sufficient on ESP32-P4. Its L1
++       * cache is writeback and internal memory is routed through it,
++       * so the relocated text still sits in the data cache while the
++       * fetch path reads stale bytes. Write the lines back, then
++       * invalidate so the fetch side reloads them.
++       *
++       * Declared locally: binfmt/ cannot include the vendor HAL
++       * headers. A proper fix belongs behind up_clean_dcache() /
++       * up_invalidate_icache(), which this port does not implement.
++       */
++
++      {
++        extern bool cache_hal_writeback_addr(uint32_t vaddr, uint32_t size);
++        extern bool cache_hal_invalidate_addr(uint32_t vaddr, uint32_t size);
++
++        cache_hal_writeback_addr((uint32_t)loadinfo.textalloc,
++                                 (uint32_t)loadinfo.textsize);
++        cache_hal_invalidate_addr((uint32_t)loadinfo.textalloc,
++                                  (uint32_t)loadinfo.textsize);
++      }
++
++#endif
++
+       binp->entrypt = (main_t)(loadinfo.textalloc + loadinfo.ehdr.e_entry);
+     }
+   else if (loadinfo.ehdr.e_type == ET_EXEC)

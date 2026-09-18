@@ -1,0 +1,153 @@
+t found
+nsh> [K
+nsh> [K
+nsh> [K(h>
+nsh: (h>: command not found
+nsh> [K
+nsh> [Ksh [[
+nsh: sh: open failed: No such file or directory
+nsh> [K
+nsh> [K
+nsh> [Kns iectory
+nsh: ns: command not found
+nsh> [K
+nsh> [K
+nsh> [Ks> ^[[K
+nsh: s>: command not found
+nsh> [K
+nsh> [K
+nsh> [Ksh>  
+nsh: sh>: command not found
+nsh> [K pe aile:
+nsh: pe: command not found
+nsh> [Knsh>^[[Kn
+nsh: nsh>^[[Kn: command not found
+nsh> [K
+nsh> [Ksh> 
+nsh: sh>: command not found
+nsh> [K
+nsh> [Kelf
+Initial memory usage: 84984
+Registering romdisk at /dev/ram0
+
+Memory Usage after romdisk_register:
+  Before:    84984 After:    85064 Change:       80
+Mounting ROMFS filesystem at target=/mnt/elf/romfs with source=/dev/ram0
+
+Memory Usage after mount:
+  Before:    85064 After:    85640 Change:      576
+
+****************************************************************************
+* Executing errno
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    85640 After:    89520 Change:     3880
+Hello, World on stdout
+Wait a bit for test completion
+Hello, World on stderr
+We failed to open "aflav-sautga-ay!" errno is 2
+
+Memory Usage after program execution:
+  Before:    89520 After:    85640 Change:    -3880
+
+****************************************************************************
+* Executing hello
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    85640 After:    89584 Change:     3944
+Getting ready to say "Hello, world"
+Wait a bit for test completion
+
+Hello, world!
+It has been said.
+
+argc	= 1
+argv	= 0x4ff72e90
+argv[0]	= (0x4ff72e98) "hello"
+argv[1]	= 0
+Goodbye, world!
+
+Memory Usage after program execution:
+  Before:    89584 After:    85640 Change:    -3944
+
+****************************************************************************
+* Executing signal
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    85640 After:    91384 Change:     5744
+siguser_action: Received signo=1 siginfo=0x4ff73580 arg=0x4ff735Wait a bit for test completion
+80
+  ERROR: Unexpected signal
+siginfo:
+  si_signo  = 1341601160
+  si_code   = 0
+  si_errno  = 115
+  si_value  = 27745
+
+Memory Usage after program execution:
+  Before:    91384 After:    85640 Change:    -5744
+
+****************************************************************************
+* Executing struct
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    85640 After:    89928 Change:     4288
+In dummyfunc() -- PASS
+Wait a bit for test completion
+
+Memory Usage after program execution:
+  Before:    89928 After:    85640 Change:    -4288
+
+****************************************************************************
+* Executing mutex
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    85640 After:    90096 Change:     4456
+Wait a bit for test completion
+
+Memory Usage after program execution:
+  Before:    90096 After:    90096 Change:        0
+
+****************************************************************************
+* Executing pthread
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    90096 After:    94376 Change:     4280
+CHILD: started with arg=1
+Wait a bit for test completion
+CHILD: expected arg=305419896
+
+Memory Usage after program execution:
+  Before:    94376 After:    90096 Change:    -4280
+
+****************************************************************************
+* Executing task
+****************************************************************************
+
+
+Memory Usage after exec:
+  Before:    90096 After:    94696 Change:     4600
+Child: execv was successful!
+Wait a bit for test completion
+Child: argc=1
+Child: expected argc to be 2
+Child: Exit-ting with status=2
+
+Memory Usage after program execution:
+  Before:    94696 After:    90096 Change:    -4600
+
+Memory Usage End-of-Test:
+  Before:    90096 After:    90096 Change:        0
+nsh> [K

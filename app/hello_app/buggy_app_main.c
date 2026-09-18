@@ -79,9 +79,68 @@ static void write_heartbeat(void)
     }
 }
 
+static void dump_pmp(void)
+{
+    unsigned long cfg[4];
+    unsigned long addr[16];
+    int i;
+
+    __asm__ __volatile__("csrr %0, 0x3a0" : "=r"(cfg[0]));
+    __asm__ __volatile__("csrr %0, 0x3a1" : "=r"(cfg[1]));
+    __asm__ __volatile__("csrr %0, 0x3a2" : "=r"(cfg[2]));
+    __asm__ __volatile__("csrr %0, 0x3a3" : "=r"(cfg[3]));
+
+    __asm__ __volatile__("csrr %0, 0x3b0" : "=r"(addr[0]));
+    __asm__ __volatile__("csrr %0, 0x3b1" : "=r"(addr[1]));
+    __asm__ __volatile__("csrr %0, 0x3b2" : "=r"(addr[2]));
+    __asm__ __volatile__("csrr %0, 0x3b3" : "=r"(addr[3]));
+    __asm__ __volatile__("csrr %0, 0x3b4" : "=r"(addr[4]));
+    __asm__ __volatile__("csrr %0, 0x3b5" : "=r"(addr[5]));
+    __asm__ __volatile__("csrr %0, 0x3b6" : "=r"(addr[6]));
+    __asm__ __volatile__("csrr %0, 0x3b7" : "=r"(addr[7]));
+    __asm__ __volatile__("csrr %0, 0x3b8" : "=r"(addr[8]));
+    __asm__ __volatile__("csrr %0, 0x3b9" : "=r"(addr[9]));
+    __asm__ __volatile__("csrr %0, 0x3ba" : "=r"(addr[10]));
+    __asm__ __volatile__("csrr %0, 0x3bb" : "=r"(addr[11]));
+    __asm__ __volatile__("csrr %0, 0x3bc" : "=r"(addr[12]));
+    __asm__ __volatile__("csrr %0, 0x3bd" : "=r"(addr[13]));
+    __asm__ __volatile__("csrr %0, 0x3be" : "=r"(addr[14]));
+    __asm__ __volatile__("csrr %0, 0x3bf" : "=r"(addr[15]));
+
+    for (i = 0; i < 16; i++) {
+        unsigned c = (unsigned)((cfg[i / 4] >> ((i % 4) * 8)) & 0xff);
+        printf("PMP%02d cfg=%02x R%d W%d X%d A%d L%d addr=%08lx top=%08lx\n",
+               i, c,
+               (c >> 0) & 1, (c >> 1) & 1, (c >> 2) & 1,
+               (c >> 3) & 3, (c >> 7) & 1,
+               addr[i], addr[i] << 2);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     pthread_t tid;
+
+    if (argc > 1 && strcmp(argv[1], "pmp") == 0) {
+        dump_pmp();
+        return 0;
+    }
+
+    if (argc > 2 && strcmp(argv[1], "md") == 0) {
+        unsigned long a = strtoul(argv[2], NULL, 0);
+        const unsigned char *p = (const unsigned char *)a;
+        int i;
+
+        printf("%08lx:", a);
+        for (i = 0; i < 32; i++) {
+            printf(" %02x", p[i]);
+            if ((i % 16) == 15 && i != 31) {
+                printf("\n%08lx:", a + i + 1);
+            }
+        }
+        printf("\n");
+        return 0;
+    }
 
     /* Run below the agent so a spinning producer cannot starve the
      * diagnostic path. The scheduler class stays SCHED_RR.
