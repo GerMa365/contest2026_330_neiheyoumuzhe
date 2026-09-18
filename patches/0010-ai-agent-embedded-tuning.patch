@@ -8,7 +8,7 @@ index 06e47a5..1fc9bfb 100644
  Kconfig.orig
 +include/agent_secrets.h
 diff --git a/include/agent_config.h b/include/agent_config.h
-index 711bb6d..d5bc5e4 100644
+index 711bb6d..e174a90 100644
 --- a/include/agent_config.h
 +++ b/include/agent_config.h
 @@ -53,6 +53,9 @@
@@ -58,6 +58,15 @@ index 711bb6d..d5bc5e4 100644
  
  /* ── Timezone (POSIX TZ format) ────────────────────────────── */
  #define AGENT_TIMEZONE "CST-8"
+@@ -177,7 +189,7 @@
+ #define AGENT_CRON_STACK (8 * 1024)
+ #define AGENT_CRON_PRIO 40
+ #define AGENT_HEARTBEAT_FILE AGENT_DATA_DIR "/HEARTBEAT.md"
+-#define AGENT_HEARTBEAT_INTERVAL_MS (30 * 60 * 1000)
++#define AGENT_HEARTBEAT_INTERVAL_MS (2 * 60 * 1000)
+ 
+ /* ── Skills ─────────────────────────────────────────────────── */
+ #define AGENT_SKILLS_DIR AGENT_DATA_DIR "/skills/"
 diff --git a/src/llm/llm_proxy.c b/src/llm/llm_proxy.c
 index 48157cc..58c6e40 100644
 --- a/src/llm/llm_proxy.c

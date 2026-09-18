@@ -4,11 +4,11 @@
 
 include $(APPDIR)/Make.defs
 
-PROGNAME  = hello_app
-PRIORITY  = SCHED_PRIORITY_DEFAULT
-STACKSIZE = 2048
+PROGNAME  = buggy_app
+PRIORITY  = 50
+STACKSIZE = 4096
 MODULE    = $(CONFIG_LVX_USE_DEMO_CONTEST2026_000_HELLO_APP)
 
-MAINSRC = hello_app_main.c
+MAINSRC = buggy_app_main.c
 
 include $(APPDIR)/Application.mk

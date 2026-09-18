@@ -1,0 +1,69 @@
+diff --git a/src/core/memory_store.c b/src/core/memory_store.c
+index 3069ad2..495ca82 100644
+--- a/src/core/memory_store.c
++++ b/src/core/memory_store.c
+@@ -117,8 +117,10 @@ int memory_store_init(void)
+ 
+     const char *default_heartbeat = 
+         "# Heartbeat\n\n"
+-        "周期性检查任务（agent 定期执行）：\n"
+-        "- [ ] 示例：检查用户待办事项\n";
++        "Periodic checks the agent runs on its own:\n"
++        "- [ ] Run the embedded self-diagnostic. Read the skill at "
++        AGENT_SKILLS_DIR "self-diagnostic.md and follow it. "
++        "Reply HEARTBEAT_OK if the heartbeat counter advanced.\n";
+ 
+     const char *default_cron = 
+         "{\n"
+@@ -130,13 +132,16 @@ int memory_store_init(void)
+     ensure_file(AGENT_USER_FILE, default_user);
+     ensure_file(AGENT_MEMORY_FILE, default_memory);
+ 
+-    char heartbeat_path[128];
+-    snprintf(heartbeat_path, sizeof(heartbeat_path), "%s/HEARTBEAT.md", AGENT_CONFIG_DIR);
+-    ensure_file(heartbeat_path, default_heartbeat);
+-
+-    char cron_path[128];
+-    snprintf(cron_path, sizeof(cron_path), "%s/cron.json", AGENT_CONFIG_DIR);
+-    ensure_file(cron_path, default_cron);
++    /* SiliconLoop: these two were created under AGENT_CONFIG_DIR while
++     * heartbeat.c and cron_service.c read AGENT_HEARTBEAT_FILE and
++     * AGENT_CRON_FILE, which sit one level up in AGENT_DATA_DIR. The
++     * files therefore never existed where the services looked:
++     * heartbeat_has_tasks() always returned false so the heartbeat
++     * never fired, and cron logged "No cron file, starting fresh" on
++     * every boot. Use the same macros the readers use.
++     */
++    ensure_file(AGENT_HEARTBEAT_FILE, default_heartbeat);
++    ensure_file(AGENT_CRON_FILE, default_cron);
+ 
+     /* Daily notes directory (created on demand by tool_files) */
+     ensure_dir(AGENT_MEMORY_DIR "/daily");
+diff --git a/src/infra/heartbeat.c b/src/infra/heartbeat.c
+index 538f074..ba7226e 100644
+--- a/src/infra/heartbeat.c
++++ b/src/infra/heartbeat.c
+@@ -23,6 +23,7 @@
+ #include "infra/heartbeat.h"
+ #include "agent_config.h"
+ #include "core/message_bus.h"
++#include "core/session_mgr.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -99,6 +100,15 @@ static bool heartbeat_send(void)
+         return false;
+     }
+ 
++    /* SiliconLoop: each heartbeat check is independent. The chat_id is
++     * fixed, so without this the session history grows on every tick:
++     * the request body climbs ~260 bytes per round and cJSON_Duplicate
++     * needs a larger contiguous block each time. On a 404KB heap the
++     * third round already fails to serialize, even with 60KB free —
++     * the heap is fragmented, not exhausted.
++     */
++    session_clear("heartbeat");
++
+     agent_msg_t msg;
+     memset(&msg, 0, sizeof(msg));
+     strncpy(msg.channel, AGENT_CHAN_SYSTEM, sizeof(msg.channel) - 1);
