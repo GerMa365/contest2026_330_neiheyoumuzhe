@@ -54,7 +54,7 @@ git archive dd92bcf425738734d1b8aed09c2bd4dbe3f2e438 | tar -x -C /tmp/nuttx_patc
 
 ---
 
-# 0002-esp-hal-skip-psram-mmu-unmap.patch
+# 0002-esp-hal-openvela-adaptation.patch
 
 ## 性质：临时绕行（workaround），非功能补充
 
@@ -114,8 +114,8 @@ espressif/esp-idf#16763（IDFGH-15850）
 
 ```bash
 cd <nuttx>/arch/risc-v/src/esp32p4/esp-hal-3rdparty
-git apply --check ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-skip-psram-mmu-unmap.patch
-git apply ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-skip-psram-mmu-unmap.patch
+git apply --check ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-openvela-adaptation.patch
+git apply ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-openvela-adaptation.patch
 ```
 
 相对路径以实际目录结构为准，建议改用绝对路径。
