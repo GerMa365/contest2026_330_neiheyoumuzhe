@@ -230,6 +230,178 @@ ESP32-P4，openvela / NuttX 13.0.0。该改动自 2026-08-20 起持续生效，
 
 ---
 
+# 0005-esp-hal-eth-link-timer-wdog.patch
+
+## 性质：资源冲突绕行，长期需要
+
+在 openvela 上启用 ESP32-P4 以太网必需。
+
+## 目标仓库
+
+`nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty`
+
+- 基线提交：`8d0a898910084206721a0892ab093021bca1496a`
+
+## 解决的问题
+
+开启 `CONFIG_ESPRESSIF_EMAC` 后 `esp_eth_driver_install()` 失败：它要
+创建一个 esp_timer，而 HAL 的 esp_timer 需要 SYSTIMER alarm 2 /
+TARGET2——该资源已被 openvela 的 `ESPRESSIF_HR_TIMER` 占用。把任一方
+挪到其他 alarm 均未成功。
+
+## 解法
+
+esp_eth.c 里这个 timer 只做一件事：周期调用 `phy->get_link()` 轮询
+网线状态，不在数据通路上。ESP-IDF 自己的头文件也称其为「用于检查链路
+状态的内部软件定时器」。改用 NuttX 的 wdog 实现同样的周期回调。
+
+补丁文件开头有完整的英文说明与验证记录。
+
+---
+
+# 0007 ~ 0012：ai_agent 板端适配与缺陷修复
+
+## 性质
+
+`packages/ai_agent` 是上游提供的 Agent 框架，原本面向有 RTC、有充裕
+内存、跑在模拟器上的环境。这六个补丁是把它跑在真实 ESP32-P4 上时
+逐个暴露并修复的问题。
+
+除 0009 外都不是本项目特有的——任何在资源受限的真机上部署 ai_agent
+的项目都会遇到。
+
+## 目标仓库
+
+`packages/ai_agent`（repo 管理的公共仓库）
+
+## 应用方式
+
+```bash
+cd <openvela 根目录>/packages/ai_agent
+for p in 0007 0008 0009 0010 0011 0012; do
+  git apply ../../contest2026_330_neiheyoumuzhe/patches/$p-*.patch
+done
+```
+
+## 各补丁
+
+| 补丁 | 内容 |
+|---|---|
+| 0007 | 主循环：单调时钟、缓存策略、本地工具捷径 |
+| 0008 | 工具定义白名单裁剪 |
+| 0009 | 数据目录宏统一 |
+| 0010 | 嵌入式内存与超时调优 |
+| 0011 | TLS 发送超时、连接池保质期、时钟校正 |
+| 0012 | 心跳与 cron 的文件路径修复 |
+
+---
+
+### 0007-ai-agent-agent-loop-fixes
+
+**看门狗用墙上时钟计时**
+
+超时判断用 `gettimeofday`。板子无 RTC，时钟从 1970 开始，TLS 握手后
+一旦校正到当前时间，已耗时会被算成 27 亿毫秒，看门狗立即误判超时。
+改用 `CLOCK_MONOTONIC`，共 10 处。
+
+**失败结果进入缓存**
+
+超时后写入的占位文案会被缓存。下一次相同提问直接从缓存返回该错误，
+不再触达网络——一次瞬时故障永久污染该提示词。加入 `!watchdog_fired`
+条件。
+
+**工具调用结果被缓存**
+
+缓存键是提示词的哈希。纯对话可以缓存，但一旦调用工具，答案就依赖
+外部状态：「读取心跳文件」会永远返回第一次的读数。加入
+`trace.total_tool_calls == 0` 条件。
+
+**定时任务被缓存永久短路**
+
+定时检查每次发送相同提示词，一旦某轮的回复进入缓存，之后每次触发
+都直接返回它：`llm_ms=0`、`tools=0`、任务从不运行，而日志仍显示
+`status=ok`。实测 114 次心跳中只有 53 次真正执行。system 通道不再
+查询缓存。
+
+**本地工具捷径截断多步推理**
+
+读取本地文件后直接把内容作为最终答复返回，跳过后续 LLM 往返。对
+「读这个文件」是合理的优化，但 Skill 执行期间会让流程在第一步就
+结束。上游已为 skills 目录打过同类补丁，这里补上 HEARTBEAT.md 与
+「Skill 执行期间」两种情形。写文件是终止步骤，仍允许捷径——否则
+最后一次复述要多花约 13KB 请求体，正是心跳第 8 轮 OOM 的位置。
+
+---
+
+### 0008-ai-agent-tool-allowlist
+
+36 个工具的 JSON schema 约 10KB。内存紧张时整块分配失败，工具定义
+被静默丢弃，模型收到的请求里一个工具都没有，表现为「模型不肯调用
+工具」。裁剪为板端实际需要的 11 个，3437 字节。
+
+---
+
+### 0009-ai-agent-data-dir-macro
+
+13 处硬编码 `/data/agent` 与宏 `AGENT_DATA_DIR`（值为
+`/data/ai_agent`）并存，读写不在同一位置。统一改用宏。
+
+上游 PR #39 修复同一问题，合并后本补丁可删除。
+
+---
+
+### 0010-ai-agent-embedded-tuning
+
+针对 404KB 堆的参数调整：工具输出池 2→1（省 16KB 峰值）、会话历史
+10→4、`CONFIG_IOB_NBUFFERS` 24→64（`netpkt_alloc failed` 由数十条
+降为 0）、LLM 超时 60→180 秒、TLS 连接池 2→1（省约 9KB BSS）。
+
+另加：`cJSON_PrintUnformatted` 返回 NULL 时记录日志——此前 OOM 是
+完全静默的。
+
+---
+
+### 0011-ai-agent-tls-timeout-and-clock
+
+**连接池 stale 重连必挂死**
+
+`tls_ctx_free()` 首先调用 `mbedtls_ssl_close_notify()`，向已失效的
+socket 写数据；而 `SO_SNDTIMEO` 仅在 `CONFIG_AI_AGENT_NET_RPMSG` 下
+设置。没有发送超时的阻塞写会永久等待，agent 主循环随之无响应。
+改为无条件设置 10 秒发送超时。
+
+**复用被服务器静默关闭的连接**
+
+复用前的 10ms 探测读只能识别对端发送 `close_notify` 的情况。服务器
+回收空闲连接时通常不发通知，探测读返回超时而非对端关闭，检查放行；
+随后的请求在 TCP 重传中停滞约 100 秒。实测三次为 93.8 / 112.8 / 125
+秒。改为记录归还时刻，闲置超过 30 秒直接重建。
+
+**无 RTC，时间从 1970 开始**
+
+从 HTTP 响应头的 `Date` 字段校正系统时钟：准确、零额外往返、不需要
+NTP 客户端。注：`strptime` 在本平台有声明无实现，日期解析改用
+`sscanf` 加月份查表。
+
+---
+
+### 0012-ai-agent-heartbeat-cron-paths
+
+`HEARTBEAT.md` 与 `cron.json` 创建在 `AGENT_CONFIG_DIR`，而
+`heartbeat.c`、`cron_service.c` 读的是上一级的 `AGENT_HEARTBEAT_FILE`
+和 `AGENT_CRON_FILE`。文件从不存在于读取方查找的位置：
+`heartbeat_has_tasks()` 恒为 false，心跳服务从未触发过；cron 每次
+开机打印 "No cron file, starting fresh"。
+
+改用读取方的宏后，该行变为 "Loaded 0 cron jobs"，心跳服务开始工作。
+
+另：每轮心跳开始前清空该会话。心跳使用固定 chat_id，会话历史逐轮
+累积，请求体每轮增长约 260 字节，`cJSON_Duplicate` 所需连续块随之
+变大，404KB 堆上第三轮即序列化失败——此时仍有 60KB 空闲，是碎片
+而非耗尽。
+
+---
+
 # 0013-esp32p4-pmp-allow-execute-from-heap.patch
 
 ## 性质：平台能力补充，长期需要

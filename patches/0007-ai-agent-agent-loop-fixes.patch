@@ -1,5 +1,5 @@
 diff --git a/src/core/agent_loop.c b/src/core/agent_loop.c
-index 3d9dec3..a221284 100644
+index 3d9dec3..379dc91 100644
 --- a/src/core/agent_loop.c
 +++ b/src/core/agent_loop.c
 @@ -43,6 +43,7 @@
@@ -76,7 +76,28 @@ index 3d9dec3..a221284 100644
  
      /* Router: select and apply best backend before first LLM call.
       * Estimate complexity from the last user message. */
-@@ -1065,9 +1094,9 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1047,8 +1076,18 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+     agent_trace_begin(&trace, msg->chat_id, msg->channel);
+     trace.backend_idx = router_idx;
+ 
+-    /* Cache check: for simple queries, try cache before LLM call */
+-    if (msg->content && complexity == LLM_COMPLEXITY_SIMPLE) {
++    /* Cache check: for simple queries, try cache before LLM call.
++     *
++     * SiliconLoop: never for the system channel. A scheduled check
++     * sends the same prompt every time it fires, so one cacheable
++     * reply makes every later tick a cache hit — llm_ms=0, no tools,
++     * the task never actually runs. Over 114 heartbeat ticks only 53
++     * performed the diagnostic; the rest returned a stale answer
++     * without touching the network. The point of a periodic task is
++     * to observe the system as it is now, which is never cacheable.
++     */
++    if (msg->content && complexity == LLM_COMPLEXITY_SIMPLE
++        && strcmp(msg->channel, AGENT_CHAN_SYSTEM) != 0) {
+         char* cached = llm_cache_get(msg->content, strlen(msg->content));
+         if (cached) {
+             syslog(LOG_INFO, "[%s] Cache hit, skipping LLM call\n", TAG);
+@@ -1065,9 +1104,9 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
  
          llm_response_t resp;
          struct timeval tv_start, tv_end;
@@ -88,7 +109,7 @@ index 3d9dec3..a221284 100644
          uint32_t latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
  
          /* Router failover: on LLM call failure, try next backend */
-@@ -1083,10 +1112,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1083,10 +1122,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
                  router_idx = next_idx;
                  trace.backend_idx = next_idx;
                  llm_response_free(&resp);
@@ -101,7 +122,7 @@ index 3d9dec3..a221284 100644
                  latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
              }
          }
-@@ -1183,10 +1212,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1183,10 +1222,10 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
                      router_idx = prem_idx;
                      trace.backend_idx = prem_idx;
  
@@ -114,7 +135,7 @@ index 3d9dec3..a221284 100644
                      latency_ms = calc_elapsed_ms(&tv_start, &tv_end);
  
                      /* Watchdog check on cascade retry */
-@@ -1288,27 +1317,52 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1288,27 +1327,52 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
                      if (input_obj) {
                          cJSON *path_obj = cJSON_GetObjectItem(input_obj, "path");
                          if (path_obj && cJSON_IsString(path_obj)
@@ -175,7 +196,7 @@ index 3d9dec3..a221284 100644
              }
          }
  
-@@ -1335,6 +1389,11 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1335,6 +1399,11 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
      if (!final_text && iteration >= AGENT_AI_AGENT_MAX_TOOL_ITER) {
          final_text = force_finish_reply(sys_prompt, messages);
          agent_trace_end(&trace, AGENT_TRACE_TIMEOUT);
@@ -187,7 +208,7 @@ index 3d9dec3..a221284 100644
      } else if (watchdog_fired) {
          agent_trace_end(&trace, AGENT_TRACE_TIMEOUT);
      } else if (final_text) {
-@@ -1344,8 +1403,22 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
+@@ -1344,8 +1413,22 @@ static char* run_react_loop(const char* sys_prompt, cJSON* messages,
      }
  
  send_reply:
