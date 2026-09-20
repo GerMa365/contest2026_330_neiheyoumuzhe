@@ -217,4 +217,4 @@ system 通道（定时任务使用的通道）不再查询缓存。周期检查�
 | `docs/evidence/2026-09-18/l3-heartbeat-114rounds.log` | 修复前 114 轮心跳日志 |
 | `docs/evidence/2026-09-19/l3-heartbeat-clean-162rounds.log` | 修复后 162 轮心跳日志 |
 | `docs/evidence/2026-09-19/l3-regression-clean.md` | 162 轮回归统计与对比分析 |
-| `patches/README.md` | 14 个补丁的根因与验证记录 |
+| `patches/README.md` | 13 个补丁的根因与验证记录 |

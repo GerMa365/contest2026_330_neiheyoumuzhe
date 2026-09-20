@@ -2,11 +2,38 @@
 
 ## 总体说明
 
-- 录制工具：picocom，115200 8N1
-- 串口设备：/dev/ttyACM0
+- 录制工具：picocom，115200 8N1，设备 `/dev/ttyACM0`
 - 录制命令：`picocom -b 115200 --omap delbs --logfile video-raw.log /dev/ttyACM0`
-- 后期需要：剪掉等待间隙、加速诊断过程、用字幕标注关键日志行
-- 串口输出会交错（agent 输出和 nsh 提示符互相覆盖），后期用字幕覆盖或剪掉乱序部分
+- 后期：剪掉等待间隙、2x 加速 LLM 等待段、字幕标注关键日志行
+- 串口输出会交错（Agent 的输出和提示符互相覆盖），后期用字幕覆盖或剪掉
+- 录制中会出现 `emac_stack_input: ERROR: emac RX netpkt_alloc failed`，
+  这是以太网收包时缓冲区一时不够，TCP 会重传，不影响功能。
+  后期字幕说明或剪掉
+
+### 两个提示符
+
+板上有两层命令环境，不能混用：
+
+| 提示符 | 环境 | 常用命令 |
+|---|---|---|
+| `nsh>` | NuttX Shell | `buggy_app`、`elf`、`ps`、`free`、`reboot` |
+| `vela>` | AI Agent | `heartbeat_trigger`、`ask`、`heap_info`、`help`、`quit` |
+
+`ai_agent` 在 `nsh>` 下启动，启动完成后出现 `vela>`。
+
+**关键限制：Agent 运行期间无法回到 `nsh>`。** 要执行 NSH 命令必须先
+`vela> quit`，或者重启板子。这决定了第二段和第三段之间必须重启。
+
+### 三段素材要分三次录
+
+| 素材 | 前置状态 |
+|---|---|
+| 第二段（正常） | 重启 → `buggy_app &` → `ai_agent` |
+| 第三段（故障） | **重启** → `buggy_app stall &` → `ai_agent` |
+| 第四段（ELF） | 重启 → `elf` |
+
+第二段和第三段之间**必须重启**，否则会有两个 `buggy_app` 同时写心跳
+文件，正常那个仍在递增，故障判定失效。
 
 ---
 
@@ -14,11 +41,11 @@
 
 ### 画面
 
-屏幕左侧放代码，右侧放板子特写（或串口终端）。
+屏幕左侧代码，右侧板子特写或串口终端。
 
 ### 旁白
 
-> 这段代码有一个 bug：
+> 这段代码有一个 bug。
 >
 > ```c
 > while (!fifo_has_space())
@@ -26,18 +53,29 @@
 > fifo_put(g_produced++);
 > ```
 >
-> 生产者等 FIFO 有空间后写入。问题是：如果消费者停止消费，FIFO 填满，这个循环就永远不会退出。
+> 生产者等 FIFO 有空间再写入。如果消费者停止消费，FIFO 填满，
+> 这个循环永远不会退出。
 >
-> 但 mock 测试发现不了它。mock 里 `fifo_has_space()` 恒为真——没有真实的 FIFO，没有真实的容量限制，测试永远通过。
+> 但 mock 测试发现不了它。mock 里没有真实的 FIFO，
+> `fifo_has_space()` 恒为真，测试永远通过。
 >
-> 只有在真机上，FIFO 真的会满，循环真的会卡死。
+> 只有在真机上，FIFO 真的会满，循环真的会卡死。而且它不崩溃、
+> 不报错，只是不动了。
+> 但要说清楚：正常情况下 FIFO 也会填满。生产者每 10 毫秒放一个，
+> 消费者每 20 毫秒取一个，生产比消费快一倍。满了之后生产者会等，
+> 消费者不断取走腾出空间，整个系统被拖慢到消费者的速度，但一直
+> 在前进。
 >
-> SiliconLoop 要解决的问题是：怎么让 AI Agent 在板上自动发现这类故障？
+> 故障不是「FIFO 满了」，而是「满了之后再也不会空」。
+>
+> SiliconLoop 要解决的问题是：怎么让 AI Agent 在板上自己发现
+> 这类故障。
 
-### 需要的画面
+### 画面要点
 
-- [ ] 代码高亮 `while (!fifo_has_space())` 这几行
-- [ ] 可选：终端跑一下 `buggy_app stall`，展示 FIFO 逐渐填满（count 从 0 到 64）
+- 代码高亮 `while (!fifo_has_space())`
+- 不展示 ps——要展示卡死状态必须先启动 buggy_app stall，会打乱
+  录制顺序。ps 的对比放在第三段效果更好
 
 ---
 
@@ -45,149 +83,167 @@
 
 ### 板上操作
 
-```bash
+```
+nsh> ifconfig
+```
+
+确认 `eth0 ... RUNNING`。
+
+```
 nsh> buggy_app &
+```
+
+后台任务的打印会挤掉提示符，**按一次回车恢复**。
+
+```
 nsh> ai_agent
 ```
 
-等待心跳自动触发（每 120 秒一轮）。为节省录制时间，启动后立即手动催一次：
+等待启动完成，出现 `vela>`。为节省录制时间手动触发一次：
 
-```bash
-nsh> heartbeat_trigger
+```
+vela> heartbeat_trigger
 ```
 
 ### 旁白
 
-> 启动 buggy_app，它在后台持续生产数据，消费者正常消费，每生产 50 个写一次心跳文件。
+> 启动 buggy_app。它在后台持续生产数据，消费者正常消费，
+> 每生产 50 个写一次心跳计数。
 >
-> 启动 AI Agent。它初始化完成后进入待命，每 120 秒自动执行一次心跳诊断。
->
-> 我手动触发一次心跳，加速演示。
+> 启动 AI Agent。它每 120 秒被心跳服务自动唤醒一次。这里手动
+> 触发一次，省去等待。
 >
 > Agent 开始执行七步诊断：
-> 1. 读取 HEARTBEAT.md，获取本轮任务
-> 2. 读取 self-diagnostic.md，加载诊断 Skill
-> 3. 第一次读心跳文件，采样当前值
-> 4. 执行 `ps`，查看进程列表
-> 5. 执行 `free`，查看堆状态
-> 6. 第二次读心跳文件，再次采样
-> 7. 写报告到 /data/ai_agent/evidence/report.md
+> 读取任务清单、载入诊断 Skill、第一次采样心跳、执行 ps、
+> 执行 free、第二次采样心跳、写报告。
 >
-> 注意：全程无人干预。Agent 自己读文件、执行命令、写报告。
+> 全程无人干预。它自己读文件、自己执行命令、自己写报告。
 >
-> 报告里有四段：观察到的证据、假设、建议、置信度。
+> 两次采样之间隔着 ps 和 free 两条命令，十几秒的间隔是自然拉开
+> 的，不依赖 Agent 主动等待——它没有 sleep 这个工具。
 >
-> 关键判据是两次心跳读数的差值。从 10900 到 10950，增加了 50——任务在前进，系统健康。
+> 判据是两次心跳读数的增量。数字在涨，说明任务在前进。
 
 ### 需要特写的日志行
 
-按出现顺序，后期用字幕或高亮标注：
+```
+[heartbeat] Triggered agent check
+[trace:...] BEGIN chat=heartbeat chan=system
+```
+→ 心跳触发，注意 `chan=system` 表示不是人发起的
 
 ```
-[trace] BEGIN chat=heartbeat chan=system
+[agent] Tool call: read_file args={"path": ".../heartbeat.txt"}
 ```
-→ 心跳触发起点
-
-```
-[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
-```
-→ 第一次采样
+→ 第一次采样（第 3 步）
 
 ```
 [agent] Tool call: run_shell args={"command": "ps"}
-```
-→ 进程列表
-
-```
 [agent] Tool call: run_shell args={"command": "free"}
 ```
-→ 堆状态
+→ 取证，同时拉开采样间隔
 
 ```
-[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[agent] Tool call: read_file args={"path": ".../heartbeat.txt"}
 ```
-→ 第二次采样
+→ 第二次采样（第 6 步）
 
 ```
-[agent] Tool call: write_file args={"path": "/data/ai_agent/evidence/report.md", ...}
+[agent] Tool call: write_file args={"path": ".../report.md", "content": "..."}
 ```
-→ 报告落盘
+→ 报告落盘，`content` 里能看到两次读数和四段式结论
 
 ```
-[trace] END status=ok iters=7 tools=7 llm_ms=... elapsed=...s
+[trace:...] END status=ok iters=7 tools=7
 ```
-→ 本轮完成
+→ 七步七工具，完整执行
+
+### 录制记录
+
+录完把实际数字填进来，后期字幕用：
+
+- 第一次心跳读数：______
+- 第二次心跳读数：______
+- 单轮耗时：______ 秒
 
 ### 后期处理
 
-- 等待 TLS 握手和 LLM 响应的时间（各 10-30 秒）用 4x-8x 加速
-- 在加速段上方加字幕"等待 LLM 响应..."
-- 七步执行过程保持原速或 2x 加速
-
+- 实测单步 2-3 秒，整轮 15-20 秒，节奏较快
+- TLS 握手和 LLM 等待间隙 2x 加速，加字幕「等待 LLM 响应」
+- 七步执行保持原速
 ---
 
 ## 第三段：故障注入对照（1 分 30 秒）
 
 ### 板上操作
 
-先确保上一轮 ai_agent 还在运行（或重新启动）：
+**必须先重启**，否则上一轮的 `buggy_app` 仍在递增心跳：
 
-```bash
-nsh> buggy_app stall &
-nsh> heartbeat_trigger
+```
+nsh> reboot
 ```
 
-或者用交互方式让 Agent 手动诊断：
+等待重启完成（picocom 可能断开，断了就重连）。
 
-```bash
-nsh> ask diagnose the device
+```
+nsh> ifconfig
+nsh> buggy_app stall &
+```
+
+**按一次回车恢复提示符**。注意这次的输出多一行：
+
+```
+buggy_app: consumer disabled, FIFO will fill up
+```
+
+```
+nsh> ai_agent
+vela> heartbeat_trigger
 ```
 
 ### 旁白
 
-> 现在注入故障。`buggy_app stall` 停止消费者，FIFO 逐渐填满，生产者卡在等待循环里。
+> 现在注入故障。`buggy_app stall` 关掉消费者，FIFO 一秒内填满，
+> 生产者卡在等待循环里，心跳不再更新。
 >
-> 触发下一轮诊断。同一个 Skill，同一套七步流程。
+> 同一个 Skill，同一套七步流程，什么都没改。
 >
-> 看关键区别：两次心跳读数。
+> 两次采样的读数相同。任务停止前进。
 >
-> 正常情况下，心跳值会递增——10900 到 10950，说明任务在前进。
+> Agent 的结论从健康变成了卡死。
 >
-> 故障情况下，心跳值不变——50 到 50。两次读数相同，说明任务卡住了，没有产出新的心跳。
->
-> Agent 的报告从"healthy"变成了"stall detected"。同样的流程，不同的结论。
->
-> 这就是判据的有效性：心跳增量是唯一无歧义的指标。`ps` 看到的任务数在两种情况下相同——buggy_app 的生产者和消费者始终是两个线程，无法据此区分。
+> 这就是判据的价值。ps 看到的任务数在两种状态下完全相同——
+> buggy_app 的生产者和消费者始终是两个线程，从进程列表看不出
+> 任何异常。心跳增量是唯一无歧义的指标。
 
 ### 需要特写的日志行
 
-**正常轮次（对比用，可从第二段的录制中取）：**
+```
+buggy_app: consumer disabled, FIFO will fill up
+```
+→ 故障注入的证据
 
 ```
-[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
-...（两次采样）...
-Heartbeat counter: 10900 → 10950
+[agent] Tool call: read_file args={"path": ".../heartbeat.txt"}
 ```
-
-**故障轮次：**
+→ 两次采样，读数相同
 
 ```
-[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
-...（两次采样）...
-Heartbeat counter: 50 → 50
+[agent] Tool call: write_file args={"path": ".../report.md", "content": "..."}
 ```
+→ 报告内容里应出现 stall / 停止前进之类的判定
 
-**报告内容对比（后期并排或切换展示）：**
+### 录制记录
 
-| 正常 | 故障 |
-|---|---|
-| "Heartbeat counter advanced, task is alive" | "Heartbeat counter unchanged, task appears stalled" |
-| 置信度：高 | 置信度：高 |
+- 第一次心跳读数：______
+- 第二次心跳读数：______（应与上一行相同）
+- Agent 的判定文字：______
 
 ### 后期处理
 
-- 左右分屏或快速切换，对比两次诊断的关键差异
-- 用箭头或高亮标注心跳读数的变化
+- 与第二段并排分屏，或快速切换对比
+- 高亮两次读数——正常那边数字不同，故障这边数字相同
+- 两段的 `ps` 输出可以并排，展示它们看起来一模一样
 
 ---
 
@@ -195,66 +251,70 @@ Heartbeat counter: 50 → 50
 
 ### 板上操作
 
-```bash
+```
+nsh> reboot
+```
+
+重启后直接运行，不需要启动 Agent：
+
+```
 nsh> elf
 ```
 
 ### 旁白
 
-> 最后展示 ELF 动态加载。
+> 最后是 ELF 动态加载。
 >
-> ESP32-P4 之前在 openvela 上不支持加载 ELF 模块。我们补了两个补丁解决了这个问题。
+> ESP32-P4 此前在 openvela 上无法执行编译期之外的程序。
 >
-> 运行 `elf` 测试。它会加载七个测试模块，逐个执行。
+> 运行 elf 测试，它加载七个模块依次执行。全部通过，而且每个测试
+> 结束后内存收支归零——加载和卸载都是干净的。
 >
-> 全部通过。
+> 这背后是两层根因。
 >
-> 这背后有两层根因：
+> 第一层是内存保护。PMP 把堆区设成可读写、不可执行，模块代码
+> 加载到堆上，第一条指令就取不出来。我们在板上把 PMP 寄存器
+> dump 出来，确认那一条规则的执行位是 0。
 >
-> 第一层是 PMP 权限。ESP32-P4 的内存保护单元把堆区设为"可读写、不可执行"，ELF 代码加载到堆上后，第一条指令就触发取指异常。我们在板上 dump 了 PMP 寄存器，确认了权限位，修改后解决。
+> 第二层是缓存。代码是通过数据通路写进去的，取指走另一条通路，
+> 而这颗芯片的 L1 缓存是写回模式——代码还在数据缓存里，取指侧
+> 读到的是旧字节。我们把加载后的内存 dump 出来，和主机上的
+> objdump 逐字节比对，证明内存内容是对的，问题只能在取指路径。
 >
-> 第二层是缓存一致性。代码经数据通路写入，但取指走另一条通路。ESP32-P4 的 L1 缓存是写回模式，重定位后的代码留在 d-cache 里，i-cache 读到的是旧字节。实测 `fence.i` 单独不够，需要显式写回 d-cache 再失效 i-cache。
+> 实测 fence.i 单独不够，它排序访存与取指，不负责刷出写回缓存。
 
 ### 需要特写的日志行
 
 ```
-Initial memory usage: 84984
+Mounting ROMFS filesystem at target=/mnt/elf/romfs
 ```
-→ 测试开始
+→ 测试模块所在的文件系统
 
 ```
 ****************************************************************************
 * Executing errno
 ****************************************************************************
 ```
-→ 每个测试的标题
+→ 每个测试的标题，共七个
 
 ```
 Hello, World on stdout
-```
-→ errno 测试的输出
-
-```
-Memory Usage End-of-Test: Change: 0
-```
-→ 每个测试结束后内存收支归零（出现 7 次）
-
-```
-****************************************************************************
-* Executing task
-****************************************************************************
-```
-→ 最后一个测试
-
-```
+Hello, world!
+In dummyfunc() -- PASS
 Child: execv was successful!
 ```
-→ 模块内再次 exec 成功
+→ 各模块的实际输出，证明代码真的在执行
+
+```
+Memory Usage End-of-Test:
+  Before:    90096 After:    90096 Change:        0
+```
+→ 收支归零
 
 ### 后期处理
 
-- 七个测试可以 2x-4x 加速，只保留每个测试的标题和 "Change: 0"
-- 最后一个测试（task）保持原速，展示 execv 成功
+- 七个测试 2x-4x 加速，保留每个标题
+- `task` 是最后一个，保持原速——它在模块内又 exec 了另一个模块
 
 ---
 
@@ -262,39 +322,77 @@ Child: execv was successful!
 
 ### 旁白
 
-> SiliconLoop，在 ESP32-P4 上让 AI Agent 自主诊断硬件故障。
->
-> 谢谢。
+> SiliconLoop：在 404KB 堆的 ESP32-P4 上，让 AI Agent 自己发现
+> 硬件故障。
 
 ### 画面
 
-- 板子特写，串口终端显示 nsh 提示符
-- 可选：再跑一次 `heartbeat_trigger`，展示 Agent 持续运行
+板子特写，串口显示 `vela>` 提示符。
 
 ---
 
-## 录制检查清单
+## 录制前检查
 
-录制前：
+按顺序执行，**每一项都要确认**：
 
-- [ ] 板子已烧录 siliconloop 固件
-- [ ] 以太网已连接，IP 配置正确（192.168.3.200）
-- [ ] `include/agent_secrets.h` 已配置 LLM 密钥
-- [ ] picocom 已启动并带 `--logfile`
-- [ ] 之前的 buggy_app 和 ai_agent 已停止（`killall buggy_app`，重启板子）
+```
+nsh> reboot
+```
 
-录制顺序：
+重连串口后：
 
-1. 开 picocom
-2. `buggy_app &` → `ai_agent` → 等待启动完成 → `heartbeat_trigger` → 等待诊断完成（第二段素材）
-3. `buggy_app stall &` → `heartbeat_trigger` → 等待诊断完成（第三段素材）
-4. 重启板子 → `elf`（第四段素材）
-5. 关 picocom
+```
+nsh> ifconfig
+```
+- [ ] `eth0 ... RUNNING`，IP 为 192.168.3.200
 
-后期：
+```
+nsh> ai_agent
+```
+- [ ] 启动日志跑完，出现 `vela>`
+- [ ] 日志中有 `[ws] WebSocket server started`（说明网络服务全起来了）
 
-- [ ] 剪掉等待间隙和串口乱序
-- [ ] 加速 LLM 响应等待段
-- [ ] 添加字幕标注关键日志行
-- [ ] 分屏对比正常/故障诊断结果
-- [ ] 总时长控制在 5 分钟内
+```
+vela> heap_info
+```
+- [ ] 空闲 ≥ 110KB
+
+> 长时间运行后堆碎片化会导致 TLS 握手失败
+> （`[vela_tls] ssl_setup ret=0x7f00`）。实测跑一百多轮后空闲降到
+> 34KB，`net_test` 和 LLM 调用全部失败。**录制前必须重启。**
+
+```
+vela> heartbeat_trigger
+```
+- [ ] 能看到 `Handshake OK` 而不是 `ssl_setup ret=0x7f00`
+- [ ] 七步跑完，`END status=ok iters=7 tools=7`
+
+确认无误后：
+
+```
+vela> quit
+nsh> reboot
+```
+
+**从干净状态开始正式录制。**
+
+## 录制顺序
+
+| # | 操作 | 素材 |
+|---|---|---|
+| 1 | 开 picocom（带 `--logfile`） | — |
+| 2 | `nsh> buggy_app &` → 回车 → `nsh> ai_agent` → `vela> heartbeat_trigger` | 第二段 |
+| 3 | `vela> quit` → `nsh> reboot` → 重连 | — |
+| 4 | `nsh> buggy_app stall &` → 回车 → `nsh> ai_agent` → `vela> heartbeat_trigger` | 第三段 |
+| 5 | `vela> quit` → `nsh> reboot` → 重连 | — |
+| 6 | `nsh> elf` | 第四段 |
+| 7 | 关 picocom，保存 `video-raw.log` | — |
+
+## 后期清单
+
+- [ ] 剪掉重启和重连的间隙
+- [ ] LLM 等待段 2x 加速
+- [ ] 字幕标注上述关键日志行
+- [ ] 第二段与第三段的心跳读数并排对比
+- [ ] 把实际录到的数字填进上面的「录制记录」
+- [ ] 总时长 ≤ 5 分钟

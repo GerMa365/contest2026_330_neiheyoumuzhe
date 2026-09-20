@@ -75,9 +75,11 @@ contest2026_330_neiheyoumuzhe/
 │   ├── parse_regression.py      从串口日志逐轮提取指标
 │   └── plot_regression.py       绘图
 ├── docs/
+│   ├── product-introduction.md  作品介绍（PDF 版一并提交）
 │   ├── technical-deep-dive.md   两个技术成果的定位过程
+│   ├── video-script.md          演示视频脚本
 │   └── evidence/                板上实测原始日志与统计，见其 README
-└── logs/                        AI Coding 日志（仅收尾阶段，见第五节）
+└── logs/                        AI Coding 日志（仅收尾阶段，见第七节）
 ```
 
 ## 四、补丁清单
@@ -254,7 +256,21 @@ nsh> buggy_app md <addr> # 读取指定内存
 
 这两个子命令是定位 ELF 加载问题时写的，保留备用。
 
-## 六、AI Coding 使用说明
+## 六、向上游的贡献
+
+| 编号 | 内容 | 对应补丁 |
+|---|---|---|
+| [nuttx#380](https://github.com/open-vela/nuttx/issues/380) | ESP32-P4 上 `esp_hr_timer` 与 HAL `esp_timer` 争用 SYSTIMER alarm 2 / TARGET2，以太网驱动无法初始化 | 0005 |
+| [packages_ai_agent#37](https://github.com/open-vela/packages_ai_agent/issues/37) | Skill 与文档硬编码 `/data/agent`，Kconfig 默认值是 `/data/ai_agent`，路径不一致导致服务从未工作 | 0009 |
+| [packages_ai_agent#39](https://github.com/open-vela/packages_ai_agent/pull/39) | 上一条的修复 PR，尚未合并 | 0009 |
+
+另有若干真机上发现、尚未提交上游的缺陷，详见 `patches/README.md`，其中几条不限于本项目：
+
+- **TLS 发送超时缺失**：连接池 stale 重连时阻塞写永久等待，agent 主循环无响应
+- **定时任务被响应缓存永久短路**：相同提示词命中缓存后任务永远不再运行，日志仍显示 `status=ok`
+- **HEARTBEAT.md 与 cron.json 路径不一致**：创建和读取在不同目录，两个服务从未工作过
+
+## 七、AI Coding 使用说明
 
 ### AI 参与的环节
 
