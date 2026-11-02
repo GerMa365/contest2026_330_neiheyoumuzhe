@@ -1,3 +1,4 @@
 docs/intro.html
 docs/*.docx
 .~lock.*
+__pycache__/
