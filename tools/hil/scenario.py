@@ -43,7 +43,11 @@ def parse_log(path):
         "llm request failed", "HTTP request failed", "timeout waiting for LLM",
         "network disconnected", "TLS connect failed"))
     recover_called = "recover_task" in txt
-    stalled_verdict = any(s in txt.lower() for s in STALL_HINTS)
+    # The verdict comes from the agent's own report (write_file tool call),
+    # not from boot noise: match hints only inside report content.
+    reports = re.findall(r"write_file args=\{\"path\": \"[^\"]*report\.md\", \"content\": \"(.*?)\"\}", txt, re.S)
+    report_txt = " ".join(reports).lower()
+    stalled_verdict = any(s in report_txt for s in STALL_HINTS)
     maxfree = None
     m = re.findall(r"maxfree\s+(\d+)", txt)
     if m:
@@ -63,7 +67,7 @@ def main():
     ap.add_argument("--rounds", type=int, default=1)
     ap.add_argument("--logfile", required=True, help="base name; round N gets .rN")
     ap.add_argument("--json", help="append per-round JSON lines here")
-    ap.add_argument("--duration", type=int, default=200,
+    ap.add_argument("--duration", type=int, default=420,
                     help="seconds to keep each session open (heartbeat ~2min)")
     args = ap.parse_args()
 

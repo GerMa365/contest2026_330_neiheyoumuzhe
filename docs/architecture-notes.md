@@ -22,3 +22,57 @@
 ## 待验证假设（规划第八节，逐条补充）
 
 （M0 进行中）
+
+## 2026-11-02 · LLM 配置链与 /data 的持久化真相
+
+发现（对 M4 至关重要）：
+
+1. `agent_main.c:559` 每次开机都会用 `agent_secrets.h` 里的编译期密钥重置
+   router slot 0。设计注释写明原因：**/data 是 tmpfs，config.json 活不过重启**。
+2. `set_llm` 的"持久化"只在 tmpfs 里，重启即失效——不是持久化机制的缺陷，
+   是存储介质本身易失。
+3. 对 M4 的影响：**修复版 ELF 放在 /data/patches/ 也活不过重启**。要在断电/
+   重启后仍能热修复，必须先把 /data 换成持久文件系统（SMARTFS 已在 config 里，
+   SPI flash 16MB，空间够；需要评估挂载点冲突与磨损）。
+   这要作为 M4 的前置任务，写进 blockers 让 Ghee 知道。
+
+本次处理（M0 范围内）：按红线"不读取 agent_secrets.h"，用 sed **盲替换**三个
+宏（URL/model/API key，值来自 model.md，全程未打印旧值或新值），重新编译烧录。
+
+## 2026-11-02 · 四条技术假设核实（M0，逐条）
+
+### 假设 1：PSRAM 第二堆可行（偏"部分可行，需实验"）
+- 现成参考配置 `configs/psram_usrheap`：`CONFIG_ESPRESSIF_SPIRAM=y`、
+  `CONFIG_MM_REGIONS=2`、`CONFIG_TESTING_HEAP=y`，且同一板级目录下有效。
+- 但 nuttx 主线 esp32p4 板级代码（contest_board/src/esp32p4_bringup.c）**没有**
+  任何 SPIRAM/PSRAM 堆注册代码；`psram_usrheap` 只是 xtensa(esp32/s3) 主线板
+  的配置名。即：ESP32-P4 的第二堆注册代码**需要自己写**（esp32p4_heap.c 或
+  在 bringup 里 mm_addregion）。
+- 结论：可行但不是"打开开关就行"。M1 若走方案 A，工作量 = esp-hal PSRAM
+  初始化 + mm_addregion + ELF 代码段仍锁内部 SRAM（补丁 0013 的 PMP 区间不变）。
+  风险中等。方案 B（压缩）为保底。
+
+### 假设 2：修复版 ELF 参照 elf 示例符号表可行 ✅（代码级已证实）
+- `apps/examples/elf/main/test_symtab.c`：手工符号表 g_elf_exports 含
+  printf/pthread_*/sleep/usleep/sigaction/kill/task_create 等 34 个符号，
+  覆盖 buggy_fixed 全部需求。
+- 加载入口 `exec(filename, args, NULL, g_elf_exports, g_elf_nexports)`
+  （elf_main.c:388），非标准 exec 支持显式传 symtab。recover_task 的 L3
+  可以复用同一表。
+- 板上实测 A 档七项全过（m0-elf-7tests.log 与 9-18 基线逐字节一致）。
+
+### 假设 3：信号恢复消费者线程可行 ✅（代码级已证实）
+- `buggy_app_main.c`：消费者由 `g_consumer_on` 标志控制（stall 模式置 0）。
+- 加一个 SIGUSR1 handler 置回 1 即实现 L1 软恢复；ai_agent 与 buggy_app
+  同为用户态任务，`kill()` 已在白名单符号表里，权限不成问题。
+- 待 M2 板上实测。
+
+### 假设 4：单行 JSON ≤ 现有 12.5KB 请求体 ✅（设计保证）
+- 工具输出缓冲 TOOL_OUTPUT_SIZE=8KB（agent_loop.c:52），单行 JSON 结果
+  ≤256B 远小于此。
+- v2.6-flash 响应带 reasoning_content，上下文增速比 v2.5 快（r4 中请求体
+  7498→10414B），M1 的余量测量必须用新模型重测，不能用旧 12.5KB 数字。
+
+### 附加发现（影响 M4）
+- /data 是 tmpfs（agent_main.c:496），重启即空 → 修复版 ELF 无法持久存放，
+  set_llm 的"持久化"同样失效。详见 docs/blockers.md。
