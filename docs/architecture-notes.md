@@ -76,3 +76,12 @@
 ### 附加发现（影响 M4）
 - /data 是 tmpfs（agent_main.c:496），重启即空 → 修复版 ELF 无法持久存放，
   set_llm 的"持久化"同样失效。详见 docs/blockers.md。
+
+### 附加发现 2（2026-11-02 11:51，batch v4）：ai_agent 关停泄漏 TLS 池
+- 现象：不复位、连续 quit+relaunch agent，第 2 轮起 `ssl_setup ret=0x7f00`
+  （mbedtls SSL_ALLOC_FAILED），free heap 从 160KB 跌到 47KB。
+- 证据：m0-scenA-batch.r2（batch v4）中
+  `Pool slot 0 still in use at shutdown, skipping`。
+- 影响：优雅关停路径在修复前不可用；ai_agent 重启必须整机复位。
+  M2 的 L2 重启（针对 buggy_app）不受影响，但实现时须验证无同类泄漏。
+- 场景脚本对策：scenario.py 每轮硬复位（v5 起）。

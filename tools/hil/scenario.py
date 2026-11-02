@@ -79,8 +79,12 @@ def main():
         # (ai_agent keeps running). "quit" returns to nsh> so the inject and
         # ai_agent commands are parsed by the right shell. The first command
         # after reset is harmless at nsh> (unknown-command noise only).
-        rc, out = run_session(lf, reset=(n == 1), duration=args.duration,
-                              cmds=["quit", inject, "ai_agent"])
+        # Reset EVERY round: ai_agent shutdown leaks its TLS pool slot
+        # ("Pool slot 0 still in use at shutdown"), so heap degrades across
+        # in-place restarts (r2 free heap 47KB -> ssl_setup 0x7f00). A board
+        # reset per round is also what M0's HIL acceptance demands.
+        rc, out = run_session(lf, reset=True, duration=args.duration,
+                              cmds=[inject, "ai_agent"])
         verdict = parse_log(lf)
         verdict.update(round=n, scenario=args.scenario, session_rc=rc)
         if args.scenario == "A":
