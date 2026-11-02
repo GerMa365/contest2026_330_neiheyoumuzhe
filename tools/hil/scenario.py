@@ -32,10 +32,22 @@ def run_session(logfile, reset, duration, cmds):
         "--logfile", logfile, "--timeout", "40",
         "--duration", str(duration), "--"] + cmds
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 120)
+    if r.returncode != 0:
+        # keep serial_run's own diagnosis visible in the scenario log
+        print(f"[serial_run rc={r.returncode}] {r.stderr[-400:]}", flush=True)
     return r.returncode, r.stdout.strip()
 
 def parse_log(path):
-    txt = open(path, "rb").read().decode(errors="replace")
+    try:
+        txt = open(path, "rb").read().decode(errors="replace")
+    except FileNotFoundError:
+        # serial_run died before writing (e.g. port not ready after flash)
+        return {
+            "status": "no_log", "iters": 0, "net_fail": False,
+            "recover_called": False, "stalled_verdict": False,
+            "maxfree": None, "oom": 0, "req_peak": None,
+            "agent_start_free": None,
+        }
     trace = TRACE_RE.findall(txt)
     status = trace[-1][0] if trace else None
     iters = int(trace[-1][1]) if trace else 0
@@ -47,17 +59,33 @@ def parse_log(path):
     # not from boot noise: match hints only inside report content.
     reports = re.findall(r"write_file args=\{\"path\": \"[^\"]*report\.md\", \"content\": \"(.*?)\"\}", txt, re.S)
     report_txt = " ".join(reports).lower()
+    # A healthy report says "heartbeat healthy (not stalled)" — strip the
+    # negated forms first or the substring hints below false-positive on
+    # them (m1-regression.r10 did exactly that).
+    report_txt = re.sub(r"\bnot\s+(stalled|frozen|stuck)\b", "", report_txt)
+    report_txt = re.sub(r"\bno\s+(stall|freeze)\b", "", report_txt)
     stalled_verdict = any(s in report_txt for s in STALL_HINTS)
     maxfree = None
-    m = re.findall(r"maxfree\s+(\d+)", txt)
+    # Agents word the free output differently across builds ("maxfree N"
+    # vs "peak free: N"); accept both so the before/after table has data.
+    m = re.findall(r"maxfree\s*:?\s*(\d+)", txt) or \
+        re.findall(r"peak free\s*:?\s*(\d+)", txt)
     if m:
         maxfree = int(m[-1])
+    # M1 acceptance: count serialization OOMs explicitly (the step-7
+    # failure mode) and record the peak request body seen this round.
+    oom_count = txt.count("OOM: failed to serialize request body")
+    req_sizes = [int(x) for x in
+                 re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes\)", txt)]
+    req_peak = max(req_sizes) if req_sizes else None
     # agent's own free-heap startup line
     m2 = re.search(r"free heap: (\d+)", txt)
     return {
         "status": status, "iters": iters, "net_fail": net_fail,
         "recover_called": recover_called, "stalled_verdict": stalled_verdict,
         "maxfree": maxfree,
+        "oom": oom_count,
+        "req_peak": req_peak,
         "agent_start_free": int(m2.group(1)) if m2 else None,
     }
 
@@ -88,8 +116,14 @@ def main():
         verdict = parse_log(lf)
         verdict.update(round=n, scenario=args.scenario, session_rc=rc)
         if args.scenario == "A":
+            # M1 acceptance: a serialization OOM anywhere in the session
+            # fails the round even if the last heartbeat trace recovered.
+            # (stalled_verdict is reported but not a pass gate: a stall
+            # wording in a healthy report is a quality signal to review,
+            # the hard criterion for M1 is 0 step-7 OOM.)
             verdict["pass"] = (verdict["status"] == "ok"
-                               and not verdict["recover_called"])
+                               and not verdict["recover_called"]
+                               and verdict.get("oom", 0) == 0)
         elif args.scenario == "B":
             verdict["pass"] = (verdict["stalled_verdict"]
                                and not verdict["net_fail"])
@@ -103,9 +137,14 @@ def main():
 
     ok = sum(1 for r in results if r["pass"])
     net = sum(1 for r in results if r["net_fail"])
+    oom = sum(r.get("oom", 0) for r in results)
+    misjudge = sum(1 for r in results if r.get("stalled_verdict"))
+    peaks = [r["req_peak"] for r in results if r.get("req_peak")]
     print(json.dumps({"summary": {"scenario": args.scenario,
                                   "rounds": len(results), "pass": ok,
-                                  "net_fail": net}}))
+                                  "net_fail": net, "oom": oom,
+                                  "misjudge_stall": misjudge,
+                                  "req_peak_max": max(peaks) if peaks else None}}))
 
 if __name__ == "__main__":
     main()
