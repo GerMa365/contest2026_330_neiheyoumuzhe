@@ -25,6 +25,7 @@ import time
 import serial
 
 NSH_PROMPT = "nsh> "
+VELA_PROMPT = "vela> "   # ai_agent CLI takes over the console when running
 FIND_PORT = __file__.replace("serial_run.py", "find_port.py")
 
 def locate_port():
@@ -113,6 +114,9 @@ def main():
     ap.add_argument("--logfile", required=True)
     ap.add_argument("--timeout", type=int, default=30,
                     help="seconds to wait for the nsh prompt")
+    ap.add_argument("--duration", type=int, default=0,
+                    help="keep the session open this many seconds after the "
+                         "last command (watch background activity)")
     ap.add_argument("cmds", nargs="*", help="commands to run, in order")
     args = ap.parse_args()
 
@@ -140,7 +144,7 @@ def main():
             buf += data
             logf.write(data)
             logf.flush()
-            if NSH_PROMPT.encode() in buf:
+            if NSH_PROMPT.encode() in buf or VELA_PROMPT.encode() in buf:
                 ok = True
                 break
 
@@ -160,6 +164,13 @@ def main():
                     deadline = time.time() + 3   # reset silence window
                     if tail.rstrip().endswith(NSH_PROMPT.strip().encode()):
                         break
+        if args.duration > 0:
+            deadline = time.time() + args.duration
+            while time.time() < deadline:
+                data = link.read(4096)
+                if data:
+                    logf.write(data)
+                    logf.flush()
         logf.write(f"\n[{time.strftime('%H:%M:%S')}] SESSION OK\n".encode())
         print(json.dumps({"ok": True, "cmds": len(args.cmds)}))
     else:
