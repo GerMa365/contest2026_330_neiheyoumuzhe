@@ -75,8 +75,12 @@ def main():
     results = []
     for n in range(1, args.rounds + 1):
         lf = f"{args.logfile}.r{n}"
+        # After round 1 the console may still be inside ai_agent's vela> CLI
+        # (ai_agent keeps running). "quit" returns to nsh> so the inject and
+        # ai_agent commands are parsed by the right shell. The first command
+        # after reset is harmless at nsh> (unknown-command noise only).
         rc, out = run_session(lf, reset=(n == 1), duration=args.duration,
-                              cmds=[inject, "ai_agent"])
+                              cmds=["quit", inject, "ai_agent"])
         verdict = parse_log(lf)
         verdict.update(round=n, scenario=args.scenario, session_rc=rc)
         if args.scenario == "A":
