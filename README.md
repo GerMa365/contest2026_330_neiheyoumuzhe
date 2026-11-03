@@ -159,6 +159,11 @@ cd <openvela>
 ./build.sh vendor/openvela/boards/contest2026_330_board/configs/siliconloop -j8
 ```
 
+> **注意（构建环境）**：编译最后一步（MKIMAGE 生成 `nuttx.bin` 镜像）
+> 需要 `esptool.py` 在 PATH 里。用虚拟环境时先 `export PATH=~/esp-venv/bin:$PATH`
+> 再编译，否则报 "esptool.py not found"、镜像生成失败（此时目标文件
+> 已链接成功，补上 PATH 重跑 `make` 即可，不用全量重编）。
+
 manifest 已把 `board/contest_board` 软链到
 `vendor/openvela/boards/contest2026_330_board`，因此 config 路径用软链
 后的位置。
