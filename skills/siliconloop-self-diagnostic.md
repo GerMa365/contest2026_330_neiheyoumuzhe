@@ -16,7 +16,11 @@ Follow these steps in order. One tool call per step.
 2. run_shell "ps" - every task and its state
 3. run_shell "free" - heap total, used, free
 4. read_file /data/ai_agent/evidence/heartbeat.txt again
-5. write_file the report to /data/ai_agent/evidence/report.md
+5. If the judgement below is stall: call recover_task once with
+   action "resume" and target "buggy_app", and record its one-line
+   JSON result. Skip this step on healthy or when the file is
+   missing.
+6. write_file the report to /data/ai_agent/evidence/report.md
 
 ## How to judge
 The heartbeat counter is the primary signal.

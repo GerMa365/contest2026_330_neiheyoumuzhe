@@ -663,3 +663,55 @@ L2 重启）与升级给人的出口；诊断报告需要记录处置与复核�
 - 主机测试 tools/host-test/recover_guard_test.c（ASan/UBSan 零报告）：
   健康态 20 次调用全部被守卫拒绝；stall 态 L1 恢复 + 复现观察通过；
   L1 无效 → L2 失败 → needs_human；恢复后观察窗内复发 → recurred。
+
+# 0018-ai-agent-skill-v2-recover-step.patch
+
+## 性质：闭环诊断 Skill 修正（M3），合并 m2-wip 后的增量补丁
+
+0017 的续篇（顺序 0015 → 0016 → 0017 → 0018），只改 skill_loader.c
+（该文件已在 0017 中改过，按规范新增增量补丁，不改旧补丁）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0017 应用后的 skill_loader.c（与 0017 同一上游基线，增量导出）。
+
+## 解决的问题
+
+场景 B（stall 注入）里模型正确判定 stall 却从不调用 recover_task：
+11-04 夜间 3 轮完成诊断的 B 轮全部如此，恢复 0/3。
+
+## 根因
+
+Skill 的步骤清单停在"5. write_file 报告"，recover_task 只出现在
+"How to recover"段落里、没有对应步骤；而报告写入在 agent_loop 里
+是**终结性本地捷径**（is_terminal_write，写完直接结束本轮、不再进
+LLM）——模型按步骤走到第 5 步写完报告，循环就结束了，永远没有机会
+在之后调工具。内联摘要（B3）还把六段式报告压成了四段。
+
+## 解法
+
+- 步骤 5 改为条件处置：判定 stall 才调 recover_task（action=resume、
+  target=buggy_app），记录一行 JSON 结果；健康或心跳文件缺失则跳过。
+  报告写作移到步骤 6，**动作发生在终结性写入之前**。
+- 内联摘要同步新步骤，并补全六段式报告的段名（Recovery Action /
+  Verification 之前被漏掉）。
+- skills/siliconloop-self-diagnostic.md 同提交同步（双份一致规则）。
+
+## 局限
+
+- 内联摘要增长约 230B 至约 1.47KB，skills_buf 1536B 内但偏紧；超长时
+  既有钳制保证不越界。若后续再加内容需同步扩 buffer。
+- 模型遵循度仍是概率性的（LLM 提议面）；裁决面（守卫/阶梯/复核）在
+  C 代码里不受影响。
+- 报告文本在串口日志里截断到约 512B（日志框架限制），scenario.py 的
+  判定已改为基于工具执行行与工具返回行（短行不截断）。
+
+## 验证记录
+
+- 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
+- 板上验证见 docs/evidence/2026-11-04/：B 轮模型按新步骤调用
+  recover_task 并拿到 {"result":"recovered"}（L1 + 复现观察）。
