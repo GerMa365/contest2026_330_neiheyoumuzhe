@@ -1,5 +1,5 @@
 From: SiliconLoop closed-loop development
-Subject: [PATCH 0016] ai-agent: recover_task tool + recovery ladder (M2)
+Subject: [PATCH 0017] ai-agent: recover_task tool + recovery ladder (M2)
 
 --- /dev/null
 +++ b/src/tools/tool_recover.c

@@ -8,7 +8,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `patches/0016-ai-agent-recover-task.patch` | recover_task 工具全量：tool_recover.c/h（新增）、tool_registry.c/h（注册 + TOOL_SEC_SENSITIVE）、Kconfig（SILOOP_RECOVERY_MODE） |
+| `patches/0017-ai-agent-recover-task.patch` | recover_task 工具全量：tool_recover.c/h（新增）、tool_registry.c/h（注册 + TOOL_SEC_SENSITIVE）、Kconfig（SILOOP_RECOVERY_MODE） |
 | `app/hello_app/buggy_app_main.c` | buggy_app 改造：SIGUSR1 软恢复、PID/mode 文件、"bug" 代码缺陷模式 |
 
 ## recover_task 设计（对齐 closed-loop-plan §3.1/3.2）
@@ -43,7 +43,7 @@ actions.log 只追加（时间,目标,动作,pre,post,结果）。
 
 ## m1-done 后集成清单（合并到 feature/closed-loop 之后做）
 
-1. `git merge m2-wip`；`patch -p1` 应用 0016 到 packages/ai_agent 工作区
+1. `git merge m2-wip`；`patch -p1` 应用 0017 到 packages/ai_agent 工作区
    （干净副本先 `git apply --check`），touch 相关源文件重编
 2. buggy_app 部署 ELFs：`apps/bin/buggy_app` → 板上 `/data/ai_agent/bin/`
    （L2 重启用）；修复版 → `/data/patches/buggy_app_fixed`（M4 构建）
