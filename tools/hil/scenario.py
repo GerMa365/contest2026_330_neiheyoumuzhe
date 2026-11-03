@@ -90,7 +90,7 @@ def parse_log(path):
     # failure mode) and record the peak request body seen this round.
     oom_count = txt.count("OOM: failed to serialize request body")
     req_sizes = [int(x) for x in
-                 re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes", txt)]
+                 re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes\)", txt)]
     req_peak = max(req_sizes) if req_sizes else None
     # classify the outcome
     if not trace and begins == 0:
