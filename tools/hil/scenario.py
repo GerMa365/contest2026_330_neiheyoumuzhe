@@ -60,6 +60,11 @@ def parse_log(path):
     trace = TRACE_RE.findall(txt)
     status = trace[-1][0] if trace else None
     iters = int(trace[-1][1]) if trace else 0
+    # Ghee 11-03: separate "window truncated" from real failures. A
+    # session whose diagnosis never reached an END (or has no trace at
+    # all) was cut by the window or stalled upstream - not a functional
+    # failure of the closed loop.
+    begins = len(re.findall(r"\[trace[^\]]*\] BEGIN", txt))
     net_fail = any(s in txt for s in (
         "llm request failed", "HTTP request failed", "timeout waiting for LLM",
         "network disconnected", "TLS connect failed"))
@@ -87,6 +92,17 @@ def parse_log(path):
     req_sizes = [int(x) for x in
                  re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes", txt)]
     req_peak = max(req_sizes) if req_sizes else None
+    # classify the outcome
+    if not trace and begins == 0:
+        cause = "no_trace"
+    elif not trace:
+        cause = "window_truncated"
+    elif status == "ok":
+        cause = "ok"
+    elif status == "timeout" or net_fail or "llm=fail" in txt:
+        cause = "net_llm"
+    else:
+        cause = "functional"
     # agent's own free-heap startup line
     m2 = re.search(r"free heap: (\d+)", txt)
     return {
@@ -95,6 +111,7 @@ def parse_log(path):
         "maxfree": maxfree,
         "oom": oom_count,
         "req_peak": req_peak,
+        "cause": cause,
         "agent_start_free": int(m2.group(1)) if m2 else None,
     }
 
@@ -104,11 +121,14 @@ def main():
     ap.add_argument("--rounds", type=int, default=1)
     ap.add_argument("--logfile", required=True, help="base name; round N gets .rN")
     ap.add_argument("--json", help="append per-round JSON lines here")
-    ap.add_argument("--duration", type=int, default=420,
-                    help="seconds to keep each session open (heartbeat ~2min)")
+    ap.add_argument("--duration", type=int, default=None,
+                    help="session window seconds; default per scenario: "
+                         "A=420, B=600, C=900 (closed-loop rounds need "
+                         "recovery+verification room)")
     args = ap.parse_args()
 
     inject = {"A": "buggy_app &", "B": "buggy_app stall &", "C": "buggy_app bug &"}[args.scenario]
+    window = args.duration if args.duration else {"A": 420, "B": 600, "C": 900}[args.scenario]
     results = []
     for n in range(1, args.rounds + 1):
         lf = f"{args.logfile}.r{n}"
@@ -120,7 +140,7 @@ def main():
         # ("Pool slot 0 still in use at shutdown"), so heap degrades across
         # in-place restarts (r2 free heap 47KB -> ssl_setup 0x7f00). A board
         # reset per round is also what M0's HIL acceptance demands.
-        rc, out = run_session(lf, reset=True, duration=args.duration,
+        rc, out = run_session(lf, reset=True, duration=window,
                               cmds=[inject, "ai_agent"])
         verdict = parse_log(lf)
         verdict.update(round=n, scenario=args.scenario, session_rc=rc)
@@ -148,11 +168,16 @@ def main():
     net = sum(1 for r in results if r["net_fail"])
     oom = sum(r.get("oom", 0) for r in results)
     misjudge = sum(1 for r in results if r.get("stalled_verdict"))
+    causes = {}
+    for r in results:
+        c = r.get("cause", "?")
+        causes[c] = causes.get(c, 0) + 1
     peaks = [r["req_peak"] for r in results if r.get("req_peak")]
     print(json.dumps({"summary": {"scenario": args.scenario,
                                   "rounds": len(results), "pass": ok,
                                   "net_fail": net, "oom": oom,
                                   "misjudge_stall": misjudge,
+                                  "cause_counts": causes,
                                   "req_peak_max": max(peaks) if peaks else None}}))
 
 if __name__ == "__main__":
