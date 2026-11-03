@@ -158,7 +158,7 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 
 ## 10. 日报格式（`~/siliconloop-private/daily/YYYY-MM-DD.md`，中文）
 
-日报的读者与写法要求见工作区根目录 CLAUDE.md。
+日报的读者与写法要求见本地个人说明（CLAUDE.local.md，不随仓库提交）。
 
 ```markdown
 # YYYY-MM-DD 日报
