@@ -516,3 +516,74 @@ IRAM/DRAM 的划分保留，固件代码段仍为不可写。
 pthread、task，含模块内再次 exec。每个测试结束后内存收支归零。
 
 日志见 `docs/evidence/2026-09-18/elf-loading-7tests-pass.log`。
+
+---
+
+# 0015-ai-agent-request-size-guard.patch
+
+## 性质：资源约束加固，长期需要
+
+影响所有把工具输出原样放进 LLM 请求的部署；设备堆越小越需要。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+- 基线：`dev` 分支 + 0007–0012 之后的 `src/core/agent_loop.c`、
+  `src/tools/skill_loader.c`、`src/core/context_builder.c`
+
+## 解决的问题
+
+诊断七步中每一步的工具结果（role:"tool" 消息）原样进入后续所有迭代的
+请求体。2026-11-02 实测：mimo-v2.6（响应带 reasoning_content，上下文
+增长更快）下单轮请求体从 7.5KB 涨到 10.4KB；模拟"双 agent 并发"的
+脚本缺陷数据中，第 7 步序列化时精确复现
+
+    [llm] OOM: failed to serialize request body
+
+即 9 月 162 轮回归中 8 次失败的同款 OOM。
+
+## 根因
+
+请求体 = 系统提示(3.0KB) + 工具清单(3.4KB) + 会话历史(最多 4 条，
+含整份报告文本) + 本轮累积的全部工具输出。堆剩余 30-46KB 时，
+cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
+
+## 解法
+
+1. `cap_tool_content()`：每条 role:"tool" 内容超过 1536B 截断并标记
+   `[...truncated by SiliconLoop memory guard]`。单工具实测最大
+   1626B（skill 文件），ps=481B、free=179B——模型推理只需结果头部。
+2. heartbeat 频道的会话历史深度 4→2：诊断是固定七步脚本，旧轮次只
+   增加字节不增加信号（人类对话保持 4）。
+3. B3 — 心跳每轮都用 read_file 读 1626B 的 self-diagnostic.md，
+   文件 + JSON 转义每轮消耗约 2KB。技能是固件常量，故把五步内联进
+   skills 摘要（"(steps inline — do NOT read the skill file)"，同时
+   压掉原"(read with: read_file ...)"提示，否则模型照提示照样去读），
+   摘要 911B→约 1.2KB；`context_builder.c` 的 skills_buf 1024→1536
+   防截尾。内联文本含四段报告格式名，报告结构不依赖读文件。
+4. B4 — 内联提示不可靠（m1-regression.r1 实测模型两轮心跳都照读
+   skill 文件），改在 `tool_files.c` read_file 工具层确定性拦截：
+   路径命中 AGENT_SKILLS_DIR 时返回摘要桩（说明 + 文件头 256B），
+   全文只在主机侧保留。请求体不再受模型行为影响。
+5. B5 — `reasoning_content`（模型思考）在 `add_assistant_message`
+   回显进后续每轮请求，m1-b-validate 实测单步 +2.4KB，是 12.5KB
+   峰值的主力之一。截断到 256B + 标记；保留字段本体防 Kimi 系 API
+   对缺失字段返回 400。
+6. 附带修复：snprintf 返回值未钳制可能使 `off` 越过 `size`
+   （摘要放在 1KB 栈缓冲上，属潜在栈越界写）。
+
+## 局限
+
+- 截断可能削掉长输出的尾部信息；当前诊断技能用到的输出全部 <1.6KB，
+  实际影响为零。若未来工具需要回传大结果，应改为"摘要由工具自己生成"。
+- static capped 缓冲区不可重入——add_tool_result_messages 的并行路径
+  在 join 之后串行调用它，安全；若改为流水线需加锁。
+
+## 验证记录
+
+- 干净副本（dev + 0007–0012）`patch --dry-run -p1` 通过（B1+B2 与 B3
+  分两次生成，均对同一基线验证）。
+- B1 生效确认：板上日志 `[agent] Tool result capped: 1626 -> 1579 bytes`
+  （m1-b-validate.r1）。
+- 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
