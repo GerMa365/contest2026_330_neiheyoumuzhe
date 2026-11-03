@@ -1,0 +1,17 @@
+== dump analysis 13:22:29 ==
+source: /tmp/dump-capture.log (session without reset after 400)
+- json.loads: OK (8405 B body)
+- utf-8: OK end-to-end; no truncation markers found in body
+- tool result/assistant messages: all tool_calls have function.name+arguments; tool msgs have name+tool_call_id+content
+- DEFECT: tools[10] = {"type":"function","function":{}} — empty function object (should be run_shell)
+- replay: POST body verbatim to /v1/chat/completions -> 400 {"param":"name is not set"} IDENTICAL to on-board error
+- conclusion: the 400s are caused by OUR request body losing fields (malformed tools entry / earlier tool_calls entries), not by server-side policy alone
+- sept evidence: request sizes only (7492->10146B), no raw bodies -> sept replay N/A
+
+== bisect experiments (13:23-14:04) ==
+1) baseline-0920 binary (as-shipped): 2 rounds, 0x400 BUT 2x401 (old key + mimo-v2.5 baked in, retired) — baseline cannot auth today; control confounded.
+2) b5off (B6 + B1-B4 + name-fixes, B5 reasoning truncation DISABLED): r1 pass, r2 hit 2x400 ("function is not set") — B5 EXONERATED; corruption persists without reasoning truncation.
+3) name-fix build (b6e): still 400s -> name additions are NOT the fix and NOT the cause (b6/b6c/50round-v2 failed before name additions existed).
+Correlation: every 400 appeared on B6-era builds (static req buffer / req_serialize); B1-B5 builds ran 5+ heartbeat cycles clean. Common factor = B6 or B6-era state.
+4) baseline+B6+current-creds variant built (/tmp/nuttx-base-b6-creds.bin) — the user's fallback minimal combo — being tested now.
+Caveat: mechanism of the tree corruption still unexplained (converter proven correct on host; replay proves body is the cause).

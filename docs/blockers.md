@@ -17,3 +17,16 @@
      但所有验收日志仍可自动完成。
 - 需要 Ghee 做什么：选择 1 或 2（我建议 1，M4 之前完成；0xd8604 附近的
   弱单元用分区边界避开即可）。
+
+## 2026-11-03 15:20 · API 400：请求树字段静默丢失（B6 时代构建）
+- 现象：MiMo 偶发 400 "name/function is not set"；dump+回放证明是我们 body
+  缺字段（tools[].function 内容 / tool_calls[].function 被丢）。"Invalid
+  JSON" 那类是 UTF-8 切坏（已修）。
+- 已排除：转换代码（host 无辜）、B5 reasoning 截断（b5off 仍 400）、
+  name 修补（非原因）、服务端无端收紧（校验一直都在）。
+- 疑因：B6 静态缓冲使堆 159K→139K，cJSON 分配失败静默丢字段（Ghee 推测）；
+  alloc 探针 9+ 请求 alloc_fail=0 未捕捉到损坏事件，**机制未定论**。
+- 已做：发送前树校验（永久，不完整不发+记 alloc_fail）、工具数组缓存、
+  messages 挂接替代深拷贝、静态缓冲 20K→16K。
+- 需要：M5 前用 50 轮验收回归数据复盘（jsonl + "request tree incomplete"
+  日志）；若仍复现，按"内存被写坏"方向查（重点：.bss 邻接、工具输出池）。
