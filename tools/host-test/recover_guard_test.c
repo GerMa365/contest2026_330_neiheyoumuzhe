@@ -17,7 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #include "tools/tool_recover.h"
@@ -69,6 +71,7 @@ static pid_t spawn_worker(int mode)
     if (pid != 0) {
         return pid;
     }
+    prctl(PR_SET_NAME, "buggy_app", 0, 0, 0); /* the PID guard checks it */
     if (mode == 0) {
         g_run = 1;
     }
@@ -95,6 +98,18 @@ static void write_pid(pid_t pid)
     FILE *f = fopen(PIDF, "w");
     fprintf(f, "%d\n", (int)pid);
     fclose(f);
+}
+
+static int call_tool(const char *action, const char *target, char *out,
+    size_t out_size);
+
+static char g_thread_out[320];
+
+static void *call_thread(void *arg)
+{
+    (void)arg;
+    call_tool("resume", "buggy_app", g_thread_out, sizeof(g_thread_out));
+    return NULL;
 }
 
 static int call_tool(const char *action, const char *target, char *out,
@@ -164,6 +179,31 @@ int main(void)
     assert(strstr(out, "\"result\":\"recurred\"") != NULL
         || strstr(out, "needs_human") != NULL);
     assert(access(NEEDS, F_OK) == 0 && "recurrence must flag human");
+    kill(w, SIGKILL);
+    waitpid(w, NULL, 0);
+
+    /* ── E. stale PID file whose number was reused: the pid lives
+     *    but is NOT buggy_app -> refused, audited ───────────────── */
+    reset_env();
+    w = spawn_worker(3); /* stalled */
+    write_pid(getpid()); /* reuse: ours, wrong name */
+    call_tool("resume", "buggy_app", out, sizeof(out));
+    printf("E: %s\n", out);
+    assert(strstr(out, "pid_mismatch") != NULL);
+    kill(w, SIGKILL);
+    waitpid(w, NULL, 0);
+
+    /* ── F. second call while a recovery is in flight -> busy ──── */
+    reset_env();
+    w = spawn_worker(2); /* L1 recovers, recurrence watch spans ~2 s */
+    write_pid(w);
+    pthread_t th;
+    pthread_create(&th, NULL, call_thread, NULL);
+    sleep(3); /* first call is inside its ladder/watch window */
+    call_tool("resume", "buggy_app", out, sizeof(out));
+    printf("F: %s\n", out);
+    assert(strstr(out, "busy") != NULL);
+    pthread_join(th, NULL);
     kill(w, SIGKILL);
     waitpid(w, NULL, 0);
 

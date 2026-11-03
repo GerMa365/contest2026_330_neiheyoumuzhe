@@ -50,3 +50,19 @@ realloc 失败不计数——但 realloc 只用于堆回退打印，其失败走
 工具数组缓存（s_tools_cache/s_tools_key）：请求间复用、body 删除前
 detach；换 tools_json 时先 Delete 旧缓存再重建；进程内单线程访问
 （agent loop 任务），无并发窗口。
+
+### 3. recover_guard_test — 守卫与升级逻辑（Ghee 验证项，ASan+UBSan）
+
+编译**真实的 tool_recover.c**（stub 平台头 + 真实头文件）：
+
+| 场景 | 断言 | 结果 |
+| --- | --- | --- |
+| A 健康态 20 次调用 | 全部 refused（板上验收同款） | 20/20 ✅ |
+| B stall → L1 SIGUSR1 | recovered，复现观察通过 | ✅ |
+| C L1 无效 → L2 失败 | needs_human（升级给人） | ✅ |
+| D 恢复后观察窗内复发 | recurred → needs_human | ✅ |
+| E PID 文件过期号码被复用 | refused:pid_mismatch（绝不误伤他进程） | ✅ |
+| F 处置进行中再次调用 | refused:busy | ✅ |
+
+零 ASan/UBSan/泄漏报告。worker 进程用 prctl 改名为 buggy_app 以
+通过 PID 身份核对。

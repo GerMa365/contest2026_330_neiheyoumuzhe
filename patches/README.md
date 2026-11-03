@@ -627,6 +627,16 @@ L2 重启）与升级给人的出口；诊断报告需要记录处置与复核�
 - 复现观察窗口 120s（一个心跳周期）在工具内 sleep，主机测试用
   -DRECUR_OBSERVE_S 缩短。
 - hotfix 入参返回 m4_deferred，M4 恢复后启用。
+- **PID 复用防护**：发出 SIGUSR1/SIGTERM 前核对 /proc/<pid>/status 的
+  Name 确为 buggy_app 家族；PID 文件过期且号码被复用时拒绝执行并记
+  actions.log（pid_mismatch）。
+- **防并发**：处置进行中（s_recovering）的再次调用返回 refused:busy；
+  串行 agent loop 下心跳诊断自然排队等待处置结束。
+- **阻塞时长**：一次调用最长约 4.3 分钟（L1 复发 + L2 复发 + 两次
+  120s 复现观察）；典型恢复路径约 2 分钟。工具执行发生在 LLM 调用
+  之间，不触发 LLM 超时（AGENT_LLM_TIMEOUT_SEC=180 只约束 llm 调用）。
+- **解锁**：`recover_task reset`（nsh/vela CLI）清 needs_human 锁存与
+  冷却状态，无需复位，供答辩现场连续演示。
 
 ## 验证记录
 

@@ -1,14 +1,15 @@
 From: SiliconLoop closed-loop development
 Subject: [PATCH 0017] ai-agent: recover_task tool + recovery ladder (M2/M3)
 
-Incremental on 0016. recover_task (TOOL_SEC_SENSITIVE) with guards,
+Incremental on 0016. recover_task (TOOL_SEC_SENSITIVE): guards,
 L1 resume / L2 restart ladder, post-action verification, recurrence
-watch and human escalation (L3 hotfix deferred with M4); Skill v2
-six-section report; SILOOP_RECOVERY_MODE Kconfig.
+watch, PID identity check, busy latch, human escalation (L3 deferred
+with M4), recover_task reset CLI; Skill v2 six-section report;
+SILOOP_RECOVERY_MODE Kconfig.
 
 --- /dev/null
 +++ b/src/tools/tool_recover.c
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,470 @@
 +/****************************************************************************
 + * SiliconLoop - recover_task tool (M2 execution plane)
 + *
@@ -96,6 +97,22 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +static time_t s_last_action;
 +static time_t s_hour_start;
 +static int s_hour_count;
++/* recovery in progress: the agent loop is single-threaded so calls are
++ * serial in practice, but the parallel tool path can run two recover
++ * requests from one LLM message - the second must wait its turn, not
++ * act. */
++static volatile int s_recovering;
++
++/* Demo unlock (nsh: recover_task reset): clear the needs_human latch
++ * and the cooldown/rate state without rebooting the board. */
++void tool_recover_reset(void)
++{
++    unlink(NEEDS_HUMAN);
++    s_last_action = 0;
++    s_hour_start = 0;
++    s_hour_count = 0;
++    s_recovering = 0;
++}
 +
 +/* ── heartbeat sampling ─────────────────────────────────────────── */
 +
@@ -174,6 +191,33 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +        argv[1] = NULL;
 +    }
 +    return posix_spawn(&child, path, NULL, NULL, argv, NULL);
++}
++
++/* SiliconLoop: a stale PID file whose number was reused must never make
++ * us signal a foreign task. Verify the pid still runs a buggy_app-family
++ * process before any kill/SIGUSR1 (M2 review item, 2026-11-03). */
++static int verify_pid_target(pid_t pid)
++{
++    char path[64];
++    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
++    FILE *f = fopen(path, "r");
++    if (!f) {
++        return ERROR;
++    }
++    char line[128];
++    int ok = ERROR;
++    while (fgets(line, sizeof(line), f)) {
++        if (strncmp(line, "Name:", 5) == 0) {
++            char name[32];
++            if (sscanf(line + 5, " %31s", name) == 1
++                && strncmp(name, "buggy_app", 9) == 0) {
++                ok = OK;
++            }
++            break;
++        }
++    }
++    fclose(f);
++    return ok;
 +}
 +
 +static int stop_task(void)
@@ -264,6 +308,13 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +        cJSON_GetObjectItem(root, "target"));
 +    bool confirm = cJSON_IsTrue(cJSON_GetObjectItem(root, "confirm"));
 +
++    if (s_recovering) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"busy\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
 +    int level = -1;
 +    if (action && strcmp(action, "resume") == 0) level = 0;
 +    else if (action && strcmp(action, "restart") == 0) level = 1;
@@ -339,6 +390,20 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +        return OK;
 +    }
 +
++    /* guard: PID identity - a stale PID file whose number was reused
++     * must never make us signal a foreign task */
++    {
++        pid_t cur_pid;
++        if (read_pid(&cur_pid) == OK
++            && verify_pid_target(cur_pid) != OK) {
++            snprintf(output, output_size,
++                "{\"result\":\"refused\",\"reason\":\"pid_mismatch\"}");
++            audit(target, action, pre_delta, -1, "pid_mismatch");
++            cJSON_Delete(root);
++            return OK;
++        }
++    }
++
 +    /* confirm mode: first call only returns the plan */
 +    if (mode == 2 && !confirm) {
 +        snprintf(output, output_size,
@@ -361,6 +426,7 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +    }
 +
 +    /* ── walk the ladder from the level the LLM proposed ─────────── */
++    s_recovering = 1;
 +    static const char *const level_name[2] = { "resume", "restart" };
 +    long post_delta = 0;
 +    int done_level = -1;
@@ -410,12 +476,13 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +            "recovered");
 +    }
 +
++    s_recovering = 0;
 +    cJSON_Delete(root);
 +    return OK;
 +}
 --- /dev/null
 +++ b/src/tools/tool_recover.h
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,21 @@
 +/* SiliconLoop M2: recover_task tool entry (TOOL_SEC_SENSITIVE).
 + * See tool_recover.c for the guard model; the tool is the only channel
 + * through which any recovery action may execute (red line 7). */
@@ -429,6 +496,10 @@ six-section report; SILOOP_RECOVERY_MODE Kconfig.
 +
 +int tool_recover_execute(const char *input_json, char *output,
 +    size_t output_size);
++
++/* Demo unlock (nsh: "recover_task reset"): clear the needs_human latch
++ * and cooldown state without rebooting. */
++void tool_recover_reset(void);
 +
 +#ifdef __cplusplus
 +}
@@ -520,6 +591,34 @@ diff --git a/a/src/tools/tool_registry.h b/a/src/tools/tool_registry.h
  /* ── External tool provider callback (breaks circular dependency) ──── */
  
  /**
+diff --git a/a/src/channels/nsh_commands.c b/a/src/channels/nsh_commands.c
+--- a/src/channels/nsh_commands.c
++++ b/src/channels/nsh_commands.c
+@@ -40,6 +40,7 @@
+ #include "tools/tool_get_time.h"
+ #include "tools/tool_proxyquickapp.h"
+ #include "tools/tool_registry.h"
++#include "tools/tool_recover.h"
+ #include "tools/tool_web_search.h"
+ #include "agent_compat.h"
+ #include "agent_config.h"
+@@ -915,6 +916,16 @@
+ 
+         if (strcmp(cmd, "help") == 0)
+             cmd_help();
++        else if (strcmp(cmd, "recover_task") == 0) {
++            /* SiliconLoop: demo unlock - clear the needs_human latch
++             * without a reboot (usage: recover_task reset) */
++            if (argc >= 2 && strcmp(argv[1], "reset") == 0) {
++                tool_recover_reset();
++                printf("recover_task: latch cleared, cooldown reset\n");
++            } else {
++                printf("usage: recover_task reset\n");
++            }
++        }
+         else if (strcmp(cmd, "net_status") == 0)
+             cmd_net_status();
+         else if (strcmp(cmd, "net_test") == 0)
 diff --git a/a/Kconfig b/a/Kconfig
 --- a/Kconfig
 +++ b/Kconfig
