@@ -66,7 +66,7 @@ contest2026_330_neiheyoumuzhe/
 │   ├── configs/siliconloop/     完整构建配置
 │   ├── src/  include/  scripts/ 板级支持
 │   └── Kconfig
-├── patches/                     13 个补丁，根因与验证见 patches/README.md
+├── patches/                     16 个补丁，根因与验证见 patches/README.md
 ├── skills/
 │   └── siliconloop-self-diagnostic.md
 │                                自诊断 Skill 的可读版本；实际编进固件的

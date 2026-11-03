@@ -94,6 +94,7 @@
   - 在干净副本上用 `git apply --check` 验证可应用。repo 管理的仓库不能直接 `git clone`，用 `git archive <基线> | tar -x -C /tmp/<dir>` 导出（见 `patches/README.md`）。
   - README "运行方式"里的补丁应用顺序同步更新。
 - **参赛仓库内的代码**（`REPO/app/`、`REPO/board/`、`REPO/tools/`）直接提交。新增应用目录要仿照 `app/hello_app/` 写 Kconfig、Make.defs、Makefile、CMakeLists.txt，并在 `contest2026_330_neiheyoumuzhe.xml` 加 `<linkfile>` 映射。
+- **Skill 内容双份同步**：修改 `skill_loader.c` 中的 Skill 内容（BUILTIN_* 宏）时，必须在同一个提交里同步更新 `skills/` 下对应的可读版本（如 `skills/siliconloop-self-diagnostic.md`），两者保持逐字一致。
 - **代码风格**跟随所在文件：ai_agent 为 4 空格缩进；nuttx 为 NuttX 风格。注释用英文，以 `SiliconLoop:` 开头说明"为什么"，参考补丁 0008。
 - **构建配置**：在 `siliconloop` 配置上开发。M0 先打标签 `baseline-0920`，并把基线固件复制到仓库外 `~/siliconloop-backup/`，作为随时可回退的保底版本。PSRAM 等高风险实验先在新配置目录 `siliconloop_exp` 里做，验收通过后再合并回 `siliconloop`。
 
