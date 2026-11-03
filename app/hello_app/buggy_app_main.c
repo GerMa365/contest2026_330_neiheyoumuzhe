@@ -12,8 +12,17 @@
  * Usage:
  *   buggy_app          run normally (consumer drains the FIFO)
  *   buggy_app stall    inject the fault (consumer stops draining)
+ *   buggy_app bug      inject the code bug (FIFO accounting drifts)
+ *
+ * M2 recovery support (SiliconLoop closed loop):
+ *   SIGUSR1  soft recovery: re-enable the consumer (L1 resume)
+ *   PID file /data/ai_agent/evidence/buggy_app.pid  for targeted kill
+ *   mode file /data/ai_agent/evidence/buggy_app.mode so recover_task
+ *     can respawn the same workload on L2 (a code bug must re-manifest
+ *     after restart so the ladder can walk L1 -> L2 -> L3)
  ****************************************************************************/
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,12 +32,15 @@
 
 #define FIFO_SIZE      64
 #define HEARTBEAT_PATH "/data/ai_agent/evidence/heartbeat.txt"
+#define PID_FILE       "/data/ai_agent/evidence/buggy_app.pid"
+#define MODE_FILE      "/data/ai_agent/evidence/buggy_app.mode"
 
 static unsigned char g_fifo[FIFO_SIZE];
 static int g_head;
 static int g_tail;
 static int g_count;
-static int g_consumer_on = 1;
+static volatile int g_consumer_on = 1;
+static int g_bug; /* the code bug: FIFO count drifts and never recovers */
 static unsigned long g_produced;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -47,9 +59,37 @@ static void fifo_put(unsigned char c)
     pthread_mutex_lock(&g_lock);
     g_fifo[g_head] = c;
     g_head = (g_head + 1) % FIFO_SIZE;
-    g_count++;
+    /* The code bug ("bug" mode): the accounting drifts by one extra per
+     * put. The consumer drains one per tick but g_count grows by two, so
+     * the FIFO hits full and the producer blocks forever — a fault that
+     * survives SIGUSR1 and re-manifests after restart. The fix-version
+     * ELF (M4 hotfix) simply increments once. */
+    g_count += g_bug ? 2 : 1;
     g_produced++;
     pthread_mutex_unlock(&g_lock);
+}
+
+/* L1 soft recovery: wake the consumer back up. The handler must be
+ * async-signal-safe; setting a flag is. */
+static void on_usr1(int sig)
+{
+    (void)sig;
+    g_consumer_on = 1;
+}
+
+static void publish_identity(const char *mode)
+{
+    FILE *f = fopen(PID_FILE, "w");
+
+    if (f) {
+        fprintf(f, "%d\n", (int)getpid());
+        fclose(f);
+    }
+    f = fopen(MODE_FILE, "w");
+    if (f) {
+        fprintf(f, "%s\n", mode ? mode : "normal");
+        fclose(f);
+    }
 }
 
 static void *consumer_thread(void *arg)
@@ -158,6 +198,17 @@ int main(int argc, char *argv[])
         g_consumer_on = 0;
         printf("buggy_app: consumer disabled, FIFO will fill up\n");
     }
+
+    if (argc > 1 && strcmp(argv[1], "bug") == 0) {
+        g_bug = 1;
+        printf("buggy_app: code bug active, FIFO accounting will drift\n");
+    }
+
+    /* L1 soft-recovery hook: recover_task sends SIGUSR1 to re-enable
+     * the consumer. Also publish pid + mode so recover_task can target
+     * exactly this task and respawn the same workload on L2. */
+    signal(SIGUSR1, on_usr1);
+    publish_identity(argc > 1 ? argv[1] : "normal");
 
     pthread_create(&tid, NULL, consumer_thread, NULL);
 
