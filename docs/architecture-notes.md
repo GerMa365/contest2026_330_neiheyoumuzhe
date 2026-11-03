@@ -85,3 +85,32 @@
 - 影响：优雅关停路径在修复前不可用；ai_agent 重启必须整机复位。
   M2 的 L2 重启（针对 buggy_app）不受影响，但实现时须验证无同类泄漏。
 - 场景脚本对策：scenario.py 每轮硬复位（v5 起）。
+
+## M4 热修复加载空间评估（2026-11-03，M1 系列数据支撑）
+
+**问题**：L3 ELF 热修复要把修复版 ELF 加载进内存执行，空间够吗？
+
+**修复版 ELF 规模**（buggy_app，app/hello_app/buggy_app_main.c）：
+- `size apps/bin/buggy_app`：**text 692B / data 28B / bss 16B**，文件 4900B
+  （ELF 头 + 段表）。M2 对它的改造（SIGUSR1 恢复、PID 文件、bug 模式）
+  预计 text 增加 1-2KB，修复版按 text ≤3KB、文件 ≤8KB 估。
+- 加载时需要：文件缓冲 8KB（/data 是 tmpfs，文件本就驻内存）+ 重定位后
+  运行镜像 ~4KB + elf 加载器瞬态几 KB。
+
+**B6 之后各阶段最大空闲块实测**（maxfree，单位 B）：
+| 数据集 | 固件 | maxfree 范围 |
+| --- | --- | --- |
+| m0 v5 批量（9 月口径对照） | 基线 | 28,000-44,000 |
+| m1-b45-validate2 | B1-B5 | 36,424 |
+| m1-50round（7 轮样本） | B1-B5 | 36,896-47,464 |
+| m1-b6c-validate | B6 | **18,736**（观察到的最差值） |
+| m1-50round-v2 | B6+UTF8 | 采集中 |
+
+**结论：空间够用。** 修复版 ELF 全流程（读文件 + 加载 + 重定位 + 执行）
+按 ≤15KB 峰值估，对照最差观测 maxfree 18.7KB 仍有余量；且这是诊断进行中
+的瞬时值，热修复发生在诊断结束后的处置阶段，届时堆更宽裕。
+- 注意 B6 的 20KB 静态请求缓冲使 agent_start_free 从 159KB 降到 139KB
+  （静态区吃掉 20KB），但对 maxfree（最大连续块）影响有限。
+- 若 M2 板上实测发现 maxfree 持续 <30KB（D5 触发条件），再评估 PSRAM。
+- 存储侧：/data 是 tmpfs，修复包重启即丢（blockers.md 待 SMARTFS 选型），
+  与"空间够不够"正交，M4 前必须解决。
