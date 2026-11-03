@@ -228,6 +228,12 @@ int main(int argc, char *argv[])
             if (probe) {
                 fprintf(probe, "0\n");
                 fclose(probe);
+                /* SiliconLoop: publish_identity() above ran before
+                 * ai_agent had mounted /data and created the evidence
+                 * directory, so that first attempt silently lost the
+                 * pid/mode files. The directory is usable now - republish
+                 * so recover_task L1/L2 has something to target. */
+                publish_identity(argc > 1 ? argv[1] : "normal");
                 break;
             }
 
