@@ -4,12 +4,12 @@ Subject: [PATCH 0017] ai-agent: recover_task tool + recovery ladder (M2/M3)
 Incremental on 0016. recover_task (TOOL_SEC_SENSITIVE): guards,
 L1 resume / L2 restart ladder, post-action verification, recurrence
 watch, PID identity check, busy latch, human escalation (L3 deferred
-with M4), recover_task reset CLI; Skill v2 six-section report;
-SILOOP_RECOVERY_MODE Kconfig.
+with M4), recover_task reset/test as human-only CLI verbs; Skill v2
+six-section report; SILOOP_RECOVERY_MODE Kconfig.
 
 --- /dev/null
 +++ b/src/tools/tool_recover.c
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,480 @@
 +/****************************************************************************
 + * SiliconLoop - recover_task tool (M2 execution plane)
 + *
@@ -315,6 +315,16 @@ SILOOP_RECOVERY_MODE Kconfig.
 +        return OK;
 +    }
 +
++    /* reset/test are human-only CLI verbs (nsh/vela CLI). They must
++     * never be reachable through an LLM tool call - refuse explicitly. */
++    if (action && (strcmp(action, "reset") == 0
++        || strcmp(action, "test") == 0)) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"cli_only\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
 +    int level = -1;
 +    if (action && strcmp(action, "resume") == 0) level = 0;
 +    else if (action && strcmp(action, "restart") == 0) level = 1;
@@ -602,7 +612,7 @@ diff --git a/a/src/channels/nsh_commands.c b/a/src/channels/nsh_commands.c
  #include "tools/tool_web_search.h"
  #include "agent_compat.h"
  #include "agent_config.h"
-@@ -915,6 +916,16 @@
+@@ -915,6 +916,39 @@
  
          if (strcmp(cmd, "help") == 0)
              cmd_help();
@@ -612,8 +622,31 @@ diff --git a/a/src/channels/nsh_commands.c b/a/src/channels/nsh_commands.c
 +            if (argc >= 2 && strcmp(argv[1], "reset") == 0) {
 +                tool_recover_reset();
 +                printf("recover_task: latch cleared, cooldown reset\n");
++            } else if (argc >= 3 && strcmp(argv[1], "test") == 0) {
++                /* M2 board acceptance driver: call the real tool
++                 * tool_registry_execute path `count` times, paced to
++                 * stay under the 10/min tool-guard rate limit. Healthy
++                 * state: every call must come back refused. */
++                int count = atoi(argv[2]);
++                char in[96];
++                char out[320];
++                snprintf(in, sizeof(in),
++                    "{\"action\":\"resume\",\"target\":\"buggy_app\"}");
++                int refused = 0;
++                for (int i = 0; i < count; i++) {
++                    out[0] = '\0';
++                    tool_registry_execute("recover_task", in, out,
++                        sizeof(out));
++                    printf("[%02d] %s\n", i, out);
++                    if (strstr(out, "refused") || strstr(out, "blocked")) {
++                        refused++;
++                    }
++                    sleep(7);
++                }
++                printf("recover_task test: %d calls, refused/blocked=%d\n",
++                    count, refused);
 +            } else {
-+                printf("usage: recover_task reset\n");
++                printf("usage: recover_task reset | recover_task test <n>\n");
 +            }
 +        }
          else if (strcmp(cmd, "net_status") == 0)

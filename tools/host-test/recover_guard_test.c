@@ -207,6 +207,15 @@ int main(void)
     kill(w, SIGKILL);
     waitpid(w, NULL, 0);
 
+    /* ── G. reset/test are human-only CLI verbs: the LLM tool entry
+     *    must refuse them outright ─────────────────────────────── */
+    call_tool("reset", "buggy_app", out, sizeof(out));
+    printf("G1: %s\n", out);
+    assert(strstr(out, "cli_only") != NULL);
+    call_tool("test", "buggy_app", out, sizeof(out));
+    printf("G2: %s\n", out);
+    assert(strstr(out, "cli_only") != NULL);
+
     printf("RECOVER GUARD TESTS: ALL GREEN\n");
     return 0;
 }
