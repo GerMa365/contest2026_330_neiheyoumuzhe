@@ -653,6 +653,9 @@ L2 重启）与升级给人的出口；诊断报告需要记录处置与复核�
   之间，不触发 LLM 超时（AGENT_LLM_TIMEOUT_SEC=180 只约束 llm 调用）。
 - **解锁**：`recover_task reset`（nsh/vela CLI）清 needs_human 锁存与
   冷却状态，无需复位，供答辩现场连续演示。
+- **reset/test 仅限人工 CLI**：两者只存在于 vela> CLI 的命令循环
+  （非 NSH 内建命令，run_shell 触达不到）；工具入参 action 传
+  reset/test 一律拒绝（cli_only），host-test G 场景覆盖。
 
 ## 验证记录
 

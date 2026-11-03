@@ -63,6 +63,7 @@ detach；换 tools_json 时先 Delete 旧缓存再重建；进程内单线程访
 | D 恢复后观察窗内复发 | recurred → needs_human | ✅ |
 | E PID 文件过期号码被复用 | refused:pid_mismatch（绝不误伤他进程） | ✅ |
 | F 处置进行中再次调用 | refused:busy | ✅ |
+| G action=reset/test 走工具入口 | refused:cli_only（人工 CLI 专属） | ✅ |
 
 零 ASan/UBSan/泄漏报告。worker 进程用 prctl 改名为 buggy_app 以
 通过 PID 身份核对。
