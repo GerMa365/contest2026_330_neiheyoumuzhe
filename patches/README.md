@@ -587,3 +587,50 @@ cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
 - B1 生效确认：板上日志 `[agent] Tool result capped: 1626 -> 1579 bytes`
   （m1-b-validate.r1）。
 - 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
+
+
+# 0017-ai-agent-recover-task.patch
+
+## 性质：闭环执行面（M2+M3），合并 m2-wip 时落地
+
+0016 的续篇（顺序 0015 → 0016 → 0017）。recover_task 是处置动作的
+唯一入口（红线 7）；"LLM 提议，确定性代码裁决"。
+
+## 目标仓库
+
+`packages/ai_agent/`（tool_recover.c/h 新增，tool_registry.c/h、Kconfig、
+skill_loader.c 增改）
+
+- 基线：0016 应用之后的树
+
+## 解决的问题
+
+场景 B/C 的处置执行面：stall 判定后需要确定性恢复（L1 软恢复 →
+L2 重启）与升级给人的出口；诊断报告需要记录处置与复核（六段式）。
+
+## 根因 / 设计
+
+- 守卫（全在 C 代码）：needs_human 锁存 → 目标白名单（仅 buggy_app）→
+  冷却 120s + 每小时 6 次上限 → Kconfig 模式（off/dry-run/confirm/auto）
+  → 独立重新采样确认 Δ=0（健康任务永不触碰）。
+- 阶梯：L1 SIGUSR1 唤醒消费者 → L2 SIGTERM+原样重启（代码缺陷会复现，
+  阶梯继续走）→ **L3 热修复随 M4 调整为"升级给人"**。
+- 处置后复核：两次采样 Δ>0 = 恢复；**复现检测（M3）**：恢复后再观察
+  一个心跳周期，Δ=0 视为复发，升一级或升级给人。
+- 返回一行 JSON ≤256B（recovered/recurred/needs_human/refused/
+  needs_confirm/dry_run）；actions.log 只追加审计。
+
+## 局限
+
+- L2/L3 各阻塞 agent loop 数秒（等待+复核+观察窗口），演示可接受；
+  并行诊断受影响时改异步处置（M5 前议）。
+- 复现观察窗口 120s（一个心跳周期）在工具内 sleep，主机测试用
+  -DRECUR_OBSERVE_S 缩短。
+- hotfix 入参返回 m4_deferred，M4 恢复后启用。
+
+## 验证记录
+
+- 干净副本（0015+0016 应用后）patch --dry-run 通过。
+- 主机测试 tools/host-test/recover_guard_test.c（ASan/UBSan 零报告）：
+  健康态 20 次调用全部被守卫拒绝；stall 态 L1 恢复 + 复现观察通过；
+  L1 无效 → L2 失败 → needs_human；恢复后观察窗内复发 → recurred。
