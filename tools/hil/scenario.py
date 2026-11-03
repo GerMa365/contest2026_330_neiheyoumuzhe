@@ -92,6 +92,13 @@ def parse_log(path):
     req_sizes = [int(x) for x in
                  re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes\)", txt)]
     req_peak = max(req_sizes) if req_sizes else None
+    # emac RX buffer starvation (heap fragmentation side-channel). Counted
+    # per round since the 50-round acceptance showed it clusters around
+    # network failures (see docs/evidence/2026-11-03/m1-acceptance.md 附2).
+    netpkt_fails = txt.count("emac RX netpkt_alloc failed")
+    # send-guard interceptions ("request tree incomplete") - Ghee's stop
+    # condition: any single one flips the recovery mode default to dry-run.
+    tree_incomplete = txt.count("request tree incomplete")
     # classify the outcome
     if not trace and begins == 0:
         cause = "no_trace"
@@ -111,6 +118,8 @@ def parse_log(path):
         "maxfree": maxfree,
         "oom": oom_count,
         "req_peak": req_peak,
+        "netpkt_alloc_fail": netpkt_fails,
+        "tree_incomplete": tree_incomplete,
         "cause": cause,
         "agent_start_free": int(m2.group(1)) if m2 else None,
     }
@@ -168,6 +177,8 @@ def main():
     net = sum(1 for r in results if r["net_fail"])
     oom = sum(r.get("oom", 0) for r in results)
     misjudge = sum(1 for r in results if r.get("stalled_verdict"))
+    netpkt = sum(r.get("netpkt_alloc_fail", 0) for r in results)
+    tree_inc = sum(r.get("tree_incomplete", 0) for r in results)
     causes = {}
     for r in results:
         c = r.get("cause", "?")
@@ -176,6 +187,8 @@ def main():
     print(json.dumps({"summary": {"scenario": args.scenario,
                                   "rounds": len(results), "pass": ok,
                                   "net_fail": net, "oom": oom,
+                                  "netpkt_alloc_fail": netpkt,
+                                  "tree_incomplete": tree_inc,
                                   "misjudge_stall": misjudge,
                                   "cause_counts": causes,
                                   "req_peak_max": max(peaks) if peaks else None}}))
