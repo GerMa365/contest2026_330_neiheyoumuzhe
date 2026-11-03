@@ -573,6 +573,14 @@ cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
 6. 附带修复：snprintf 返回值未钳制可能使 `off` 越过 `size`
    （摘要放在 1KB 栈缓冲上，属潜在栈越界写）。
 
+## 与 0009 的分层说明（skill_loader.c / tool_files.c）
+
+0015 中 skill_loader.c 的改动（B3：诊断步骤内联进 skills 摘要 + 报告
+四段格式名 + snprintf 越界钳制）和 tool_files.c 的改动（B4：技能文件
+读取返回摘要桩）都以 **0009 应用后的 skill_loader.c/tool_files.c 为基线**
+（0009 做了 AGENT_DATA_DIR 宏化改造，本补丁不改 0009 本身）。
+0009 先应用、0015 后应用，顺序不可交换。
+
 ## 局限
 
 - 截断可能削掉长输出的尾部信息；当前诊断技能用到的输出全部 <1.6KB，
@@ -595,3 +603,60 @@ cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
 - B1 生效确认：板上日志 `[agent] Tool result capped: 1626 -> 1579 bytes`
   （m1-b-validate.r1）。
 - 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
+
+
+# 0016-ai-agent-request-tree-guard.patch
+
+## 性质：资源约束加固 + 请求完整性守卫，长期需要
+
+0015 的续篇。请求树构建期的静默失败会把缺字段的 body 发给 API
+（400 "name/function is not set"），守卫必须既预防又拦截。
+
+## 目标仓库
+
+`packages/ai_agent/`（agent_loop.c / llm_proxy.c / llm_parse.c）
+
+- 基线：0015 应用之后的树
+
+## 解决的问题
+
+2026-11-03 排查：MiMo 偶发 400 "name/function is not set"。
+dump+回放证明是**我们发出的请求树缺字段**（tools[].function 内容 /
+tool_calls[].function 被丢），回放修复字段后即 200。二分定位与
+B6 静态缓冲带来的堆压力相关（堆 159K→139K）；cJSON 分配失败时不
+报错、静默丢字段。
+
+## 根因
+
+cJSON_AddStringToObject / cJSON_Duplicate 分配失败即跳过，不返回
+可查错误；请求树组装期（工具数组每请求重建 ~10KB 深拷贝、messages
+深拷贝）在碎片化堆上命中失败，字段静默丢失。
+
+## 解法
+
+1. **alloc 探针**：cJSON_InitHooks 计数型钩子，每个请求日志附带
+   `alloc_fail=N +Δ`（主机测试证实 120/120 注入失败全部计数）。
+2. **发送前校验**（永久保留）：tools[].function.name、messages[].role、
+   tools 整体存在性校验，不完整不发请求并记
+   `request tree incomplete (alloc_fail=N)`。
+3. **减压三项**：工具数组一次构建缓存复用；messages 临时挂接/摘下
+   替代 cJSON_Duplicate 深拷贝；静态序列化缓冲 20KB→16KB（实测最大
+   请求 12.7KB）。
+4. name 修补：role:"tool" 消息补 name 字段（严格校验器要求）；
+   build_openai_tools_array 跳过无 name 的工具定义。
+5. 400 落盘：失败请求体写 /data/ai_agent/evidence/last_request.json
+   供尸检；落盘在 req_release 之前（避免释放后读）。
+
+## 局限
+
+- 该 cJSON 版本 Hooks 不含 realloc_fn，realloc 失败不计数——仅影响
+  堆回退打印路径，其失败有独立日志（OOM: failed to serialize）。
+- 工具数组缓存假设 tools_json 逐消息稳定；变化时自动重建。
+- 机制层面"堆压力→静默丢字段"未在探针里直接复现（损坏为间歇性），
+  50 轮验收回归携带探针继续采样。
+
+## 验证记录
+
+- 干净副本（HEAD+0007..0012+0015）`git apply --check` 通过。
+- 主机测试（REPO/tools/host-test/）：探针有效性 120/120、ASan 20 轮
+  五条出口路径零报告。
