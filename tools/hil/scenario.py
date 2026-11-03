@@ -31,7 +31,16 @@ def run_session(logfile, reset, duration, cmds):
     cmd = SERIAL + (["--reset"] if reset else []) + [
         "--logfile", logfile, "--timeout", "40",
         "--duration", str(duration), "--"] + cmds
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 120)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=duration + 120)
+    except subprocess.TimeoutExpired as e:
+        # serial_run wedged (seen 11-03: a hung LLM call froze the log
+        # mid-round). Kill it and treat the round as a session timeout —
+        # network/LLM trouble, not a scenario failure.
+        print(f"[session timeout after {duration + 120}s: "
+              f"{(e.stderr or b'')[-200:]!r}]", flush=True)
+        return 124, ""
     if r.returncode != 0:
         # keep serial_run's own diagnosis visible in the scenario log
         print(f"[serial_run rc={r.returncode}] {r.stderr[-400:]}", flush=True)
