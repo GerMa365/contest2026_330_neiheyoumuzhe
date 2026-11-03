@@ -1,7 +1,7 @@
 # SiliconLoop · Claude Code 工作手册
 
 本文件位于参赛仓库根目录 `contest2026_330_neiheyoumuzhe/CLAUDE.md`，由 openvela 工作区根目录的 `CLAUDE.md` 导入，每次会话自动加载。
-**需求来源**是 `docs/closed-loop-plan.md`（做什么、验收标准）；**本文件**是规则（怎么做、不能做什么）。两者冲突时以本文件为准，并在 `docs/blockers.md` 记录。
+**需求来源**是 `~/siliconloop-private/closed-loop-plan.md`（做什么、验收标准）；**本文件**是规则（怎么做、不能做什么）。两者冲突时以本文件为准，并在 `docs/blockers.md` 记录。
 
 ---
 
@@ -15,7 +15,6 @@
 | 参赛仓库在工作区内的远程名 | `origin` → https://github.com/open-vela/contest2026_330_neiheyoumuzhe |
 | fork 远程 | `fork` → `https://github.com/GerMa365/contest2026_330_neiheyoumuzhe.git` |
 | esptool | `/home/w/esp-venv/bin/esptool` v5.3.1（虚拟环境 /home/w/esp-venv，操作板子的脚本一律用它） |
-| 答辩人 | Ghee（嵌入式零基础，日报要让她能看懂并讲出来） |
 
 下文所有相对路径都以 ROOT 为起点；`REPO` 指 `contest2026_330_neiheyoumuzhe/`。
 
@@ -36,8 +35,8 @@
 
 ## 2. 工作方式
 
-- **只做当前指令指定的里程碑**。任务与验收标准见 `docs/closed-loop-plan.md` 第四节。完成后停下汇报，不自行开始下一个。
-- **每次会话开始**：先读 `docs/daily/` 最新一份日报和 `docs/blockers.md`，再读当前里程碑涉及的代码。
+- **只做当前指令指定的里程碑**。任务与验收标准见 `~/siliconloop-private/closed-loop-plan.md` 第四节。完成后停下汇报，不自行开始下一个。
+- **每次会话开始**：先读 `~/siliconloop-private/daily/` 最新一份日报和 `docs/blockers.md`，再读当前里程碑涉及的代码。
 - **先读后改**：改任何文件前先读懂相关代码。规划里的方案与代码事实冲突时，以代码为准，结论写入 `docs/architecture-notes.md`。
 - **验收靠板上实测**：每条验收标准都要有对应的串口原始日志。不能用"理论上可行""应该能过"代替实测结果。
 - **小步提交**：每满足一条验收标准就提交一次。
@@ -156,9 +155,9 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 
 ---
 
-## 10. 日报格式（`docs/daily/YYYY-MM-DD.md`，中文）
+## 10. 日报格式（`~/siliconloop-private/daily/YYYY-MM-DD.md`，中文）
 
-读者是答辩人 Ghee。她需要能把每个改动向评委讲清楚。
+日报的读者与写法要求见工作区根目录 CLAUDE.md。
 
 ```markdown
 # YYYY-MM-DD 日报

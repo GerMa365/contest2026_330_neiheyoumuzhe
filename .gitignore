@@ -2,3 +2,7 @@ docs/intro.html
 docs/*.docx
 .~lock.*
 __pycache__/
+
+# personal notes live in ~/siliconloop-private/ (kept out of the repo)
+docs/closed-loop-plan.md
+docs/daily/

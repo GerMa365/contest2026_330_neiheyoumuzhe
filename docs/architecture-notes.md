@@ -34,7 +34,7 @@
 3. 对 M4 的影响：**修复版 ELF 放在 /data/patches/ 也活不过重启**。要在断电/
    重启后仍能热修复，必须先把 /data 换成持久文件系统（SMARTFS 已在 config 里，
    SPI flash 16MB，空间够；需要评估挂载点冲突与磨损）。
-   这要作为 M4 的前置任务，写进 blockers 让 Ghee 知道。
+   这要作为 M4 的前置任务，记入 blockers 供知悉与决策。
 
 本次处理（M0 范围内）：按红线"不读取 agent_secrets.h"，用 sed **盲替换**三个
 宏（URL/model/API key，值来自 model.md，全程未打印旧值或新值），重新编译烧录。
