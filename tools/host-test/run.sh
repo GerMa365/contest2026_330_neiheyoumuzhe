@@ -34,4 +34,14 @@ gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined -I"$CJSON_INC" -I"$OUT" \
     -o "$OUT/asround_test"
 ASAN_OPTIONS=detect_leaks=1 "$OUT/asround_test"
 
+# recover_task guards & escalation: real tool_recover.c, real headers,
+# timings shortened via -D for testability
+gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined \
+    -DCONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR='"/tmp/host-test-data"' \
+    -DCOOLDOWN_S=1 -DRECUR_OBSERVE_S=2 \
+    -I"$HERE/stubs" -I"$AI/src" -I"$CJSON_INC" \
+    "$HERE/recover_guard_test.c" "$AI/src/tools/tool_recover.c" \
+    "$CJSON_DIR/cJSON.c" -lpthread -lm -o "$OUT/recover_guard_test"
+ASAN_OPTIONS=detect_leaks=1 "$OUT/recover_guard_test"
+
 echo "HOST-TEST SUITE: ALL GREEN"

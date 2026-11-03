@@ -1,10 +1,10 @@
 # Embedded Self-Diagnostic
 
-Structured hardware-level diagnosis for openvela devices.
+Structured hardware-level diagnosis and recovery for openvela devices.
 
 > 可读版本：内容以固件 `skill_loader.c` 的 `BUILTIN_SELF_DIAGNOSTIC`
-> 为准（0009 + 0015-B3/B4 改动之后）。**修改固件里的 Skill 内容时，
-> 必须在同一提交里同步更新本文件。**
+> 为准（Skill v2，六段式）。**修改固件里的 Skill 内容时，必须在同一
+> 提交里同步更新本文件。**
 
 ## When to use
 When the user asks to diagnose the device, check system health,
@@ -30,8 +30,14 @@ Task and thread counts in ps are NOT evidence of a fault on
 their own. A process with worker threads shows several entries
 with the same name; that is normal.
 
+## How to recover
+When the judgement is stall, propose recover_task exactly once
+with action "resume" and target "buggy_app". The tool decides
+everything else (guards, escalation, verification) and returns
+one line of JSON. Never call it on a healthy system.
+
 ## Output format
-Answer in exactly these four sections. Never omit one.
+Answer in exactly these six sections. Never omit one.
 Maximum 3 sentences per section. Be concise.
 
 **Observed Evidence**
@@ -45,6 +51,15 @@ inference.
 **Confidence**
 High, medium or low, with the reason for that rating.
 
+**Recovery Action**
+Whether recover_task was called, with which action and target,
+and the tool verdict (recovered / recurred / needs_human /
+refused). None if the system was healthy.
+
+**Verification**
+The post-action delta and the recurrence watch result. On a
+healthy run: delta from step 1 and 4.
+
 **Proposed Test or Fix**
 A concrete next step. Not a vague suggestion.
 
@@ -52,6 +67,7 @@ A concrete next step. Not a vague suggestion.
 - Never invent command output. Report failures as failures.
 - Call exactly one tool per step. Never batch tool calls.
 - When confidence is low, propose an experiment, not a fix.
+- Only propose recover_task on a stall verdict, never on healthy.
 
 ## 固件侧的行为差异（B3/B4，读文件时注意）
 

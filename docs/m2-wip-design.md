@@ -1,6 +1,6 @@
 # M2 执行面（m2-wip 分支工作稿）
 
-> 状态：**WIP，不烧板、不测试**。M1 验收通过并打 `m1-done` 标签后合并、
+> 状态：**代码已完成（M2+M3），主机测试通过**；待 M1 验收后合并上板。M1 验收通过并打 `m1-done` 标签后合并、
 > 应补丁、构建烧录、跑场景 B/C 验收（见文末集成清单）。
 > 授权来源：Ghee 2026-11-03（50 轮回归期间可并行编写 M2，隔离到 m2-wip）。
 
@@ -27,10 +27,10 @@
 - **L1 resume**：读 PID 文件 → SIGUSR1 → buggy_app 重开消费者 → 复核
 - **L2 restart**：SIGTERM → 按 mode 文件**原样重启**（代码缺陷必须复现，
   阶梯才能走 L1→L2→L3；stall 类故障靠 L1 恢复）→ 复核
-- **L3 hotfix**：SIGTERM → 启动修复版 ELF（/data/patches/buggy_app_fixed，
-  M4 交付物）→ 复核；仍失败 → needs_human
+- **L3 hotfix**：随 M4 调整（M4 放弃，记 blockers）→ L2 失败/复发即
+  **升级给人**（needs_human 锁存，复位前不再自动处置）
 
-复核：处置后采样 Δ>0 = recovered；JSON 一行 ≤256B；
+复核：处置后采样 Δ>0 = recovered；复现检测（M3）：再观察一个心跳周期后复采，Δ=0 = recurred（升级）；JSON 一行 ≤256B；
 actions.log 只追加（时间,目标,动作,pre,post,结果）。
 
 ## buggy_app 改造要点

@@ -605,58 +605,48 @@ cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
 - 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
 
 
-# 0016-ai-agent-request-tree-guard.patch
+# 0017-ai-agent-recover-task.patch
 
-## 性质：资源约束加固 + 请求完整性守卫，长期需要
+## 性质：闭环执行面（M2+M3），合并 m2-wip 时落地
 
-0015 的续篇。请求树构建期的静默失败会把缺字段的 body 发给 API
-（400 "name/function is not set"），守卫必须既预防又拦截。
+0016 的续篇（顺序 0015 → 0016 → 0017）。recover_task 是处置动作的
+唯一入口（红线 7）；"LLM 提议，确定性代码裁决"。
 
 ## 目标仓库
 
-`packages/ai_agent/`（agent_loop.c / llm_proxy.c / llm_parse.c）
+`packages/ai_agent/`（tool_recover.c/h 新增，tool_registry.c/h、Kconfig、
+skill_loader.c 增改）
 
-- 基线：0015 应用之后的树
+- 基线：0016 应用之后的树
 
 ## 解决的问题
 
-2026-11-03 排查：MiMo 偶发 400 "name/function is not set"。
-dump+回放证明是**我们发出的请求树缺字段**（tools[].function 内容 /
-tool_calls[].function 被丢），回放修复字段后即 200。二分定位与
-B6 静态缓冲带来的堆压力相关（堆 159K→139K）；cJSON 分配失败时不
-报错、静默丢字段。
+场景 B/C 的处置执行面：stall 判定后需要确定性恢复（L1 软恢复 →
+L2 重启）与升级给人的出口；诊断报告需要记录处置与复核（六段式）。
 
-## 根因
+## 根因 / 设计
 
-cJSON_AddStringToObject / cJSON_Duplicate 分配失败即跳过，不返回
-可查错误；请求树组装期（工具数组每请求重建 ~10KB 深拷贝、messages
-深拷贝）在碎片化堆上命中失败，字段静默丢失。
-
-## 解法
-
-1. **alloc 探针**：cJSON_InitHooks 计数型钩子，每个请求日志附带
-   `alloc_fail=N +Δ`（主机测试证实 120/120 注入失败全部计数）。
-2. **发送前校验**（永久保留）：tools[].function.name、messages[].role、
-   tools 整体存在性校验，不完整不发请求并记
-   `request tree incomplete (alloc_fail=N)`。
-3. **减压三项**：工具数组一次构建缓存复用；messages 临时挂接/摘下
-   替代 cJSON_Duplicate 深拷贝；静态序列化缓冲 20KB→16KB（实测最大
-   请求 12.7KB）。
-4. name 修补：role:"tool" 消息补 name 字段（严格校验器要求）；
-   build_openai_tools_array 跳过无 name 的工具定义。
-5. 400 落盘：失败请求体写 /data/ai_agent/evidence/last_request.json
-   供尸检；落盘在 req_release 之前（避免释放后读）。
+- 守卫（全在 C 代码）：needs_human 锁存 → 目标白名单（仅 buggy_app）→
+  冷却 120s + 每小时 6 次上限 → Kconfig 模式（off/dry-run/confirm/auto）
+  → 独立重新采样确认 Δ=0（健康任务永不触碰）。
+- 阶梯：L1 SIGUSR1 唤醒消费者 → L2 SIGTERM+原样重启（代码缺陷会复现，
+  阶梯继续走）→ **L3 热修复随 M4 调整为"升级给人"**。
+- 处置后复核：两次采样 Δ>0 = 恢复；**复现检测（M3）**：恢复后再观察
+  一个心跳周期，Δ=0 视为复发，升一级或升级给人。
+- 返回一行 JSON ≤256B（recovered/recurred/needs_human/refused/
+  needs_confirm/dry_run）；actions.log 只追加审计。
 
 ## 局限
 
-- 该 cJSON 版本 Hooks 不含 realloc_fn，realloc 失败不计数——仅影响
-  堆回退打印路径，其失败有独立日志（OOM: failed to serialize）。
-- 工具数组缓存假设 tools_json 逐消息稳定；变化时自动重建。
-- 机制层面"堆压力→静默丢字段"未在探针里直接复现（损坏为间歇性），
-  50 轮验收回归携带探针继续采样。
+- L2/L3 各阻塞 agent loop 数秒（等待+复核+观察窗口），演示可接受；
+  并行诊断受影响时改异步处置（M5 前议）。
+- 复现观察窗口 120s（一个心跳周期）在工具内 sleep，主机测试用
+  -DRECUR_OBSERVE_S 缩短。
+- hotfix 入参返回 m4_deferred，M4 恢复后启用。
 
 ## 验证记录
 
-- 干净副本（HEAD+0007..0012+0015）`git apply --check` 通过。
-- 主机测试（REPO/tools/host-test/）：探针有效性 120/120、ASan 20 轮
-  五条出口路径零报告。
+- 干净副本（0015+0016 应用后）patch --dry-run 通过。
+- 主机测试 tools/host-test/recover_guard_test.c（ASan/UBSan 零报告）：
+  健康态 20 次调用全部被守卫拒绝；stall 态 L1 恢复 + 复现观察通过；
+  L1 无效 → L2 失败 → needs_human；恢复后观察窗内复发 → recurred。
