@@ -25,7 +25,8 @@ HERE = __file__.rsplit("/", 1)[0]
 SERIAL = [sys.executable, HERE + "/serial_run.py"]
 
 TRACE_RE = re.compile(r"\[trace[^\]]*\] END status=(\w+) iters=(\d+) tools=(\d+)")
-STALL_HINTS = ("stalled", "no progress", "heartbeat counter did not", "frozen")
+STALL_HINTS = ("stalled", "stall", "no progress", "heartbeat counter did not",
+               "frozen")
 
 def run_session(logfile, reset, duration, cmds):
     cmd = SERIAL + (["--reset"] if reset else []) + [
@@ -54,6 +55,7 @@ def parse_log(path):
         return {
             "status": "no_log", "iters": 0, "net_fail": False,
             "recover_called": False, "stalled_verdict": False,
+            "recovered": False,
             "maxfree": None, "oom": 0, "req_peak": None,
             "agent_start_free": None,
         }
@@ -68,15 +70,24 @@ def parse_log(path):
     net_fail = any(s in txt for s in (
         "llm request failed", "HTTP request failed", "timeout waiting for LLM",
         "network disconnected", "TLS connect failed"))
-    recover_called = "recover_task" in txt
+    # Count only real tool executions. The boot log prints
+    # "[tools] Registered tool: recover_task" in every round since M2, so a
+    # bare substring match false-positives on all of them (seen in the
+    # 11-04 overnight run: recover_called=True in 20/20 rounds with zero
+    # actual executions).
+    recover_called = "Executing tool: recover_task" in txt
+    # The tool's own one-line verdict. Short line, never truncated.
+    recovered_result = '"result":"recovered"' in txt
     # The verdict comes from the agent's own report (write_file tool call),
-    # not from boot noise: match hints only inside report content.
-    reports = re.findall(r"write_file args=\{\"path\": \"[^\"]*report\.md\", \"content\": \"(.*?)\"\}", txt, re.S)
+    # not from boot noise: match hints only inside report content. Tool-call
+    # args are truncated in the serial log (~512 B), so capture whatever
+    # prefix is visible instead of requiring the closing quote.
+    reports = re.findall(r"write_file args=\{\"path\": \"[^\"]*report\.md\", \"content\": \"(.*)", txt)
     report_txt = " ".join(reports).lower()
     # A healthy report says "heartbeat healthy (not stalled)" — strip the
     # negated forms first or the substring hints below false-positive on
     # them (m1-regression.r10 did exactly that).
-    report_txt = re.sub(r"\bnot\s+(stalled|frozen|stuck)\b", "", report_txt)
+    report_txt = re.sub(r"\bnot\s+(a\s+)?(stalled|stall|frozen|stuck)\b", "", report_txt)
     report_txt = re.sub(r"\bno\s+(stall|freeze)\b", "", report_txt)
     stalled_verdict = any(s in report_txt for s in STALL_HINTS)
     maxfree = None
@@ -90,7 +101,7 @@ def parse_log(path):
     # failure mode) and record the peak request body seen this round.
     oom_count = txt.count("OOM: failed to serialize request body")
     req_sizes = [int(x) for x in
-                 re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes\)", txt)]
+                 re.findall(r"OpenAI API with tools \(model: [^,]+, (\d+) bytes", txt)]
     req_peak = max(req_sizes) if req_sizes else None
     # emac RX buffer starvation (heap fragmentation side-channel). Counted
     # per round since the 50-round acceptance showed it clusters around
@@ -115,6 +126,7 @@ def parse_log(path):
     return {
         "status": status, "iters": iters, "net_fail": net_fail,
         "recover_called": recover_called, "stalled_verdict": stalled_verdict,
+        "recovered": recovered_result,
         "maxfree": maxfree,
         "oom": oom_count,
         "req_peak": req_peak,
@@ -163,7 +175,12 @@ def main():
                                and not verdict["recover_called"]
                                and verdict.get("oom", 0) == 0)
         elif args.scenario == "B":
-            verdict["pass"] = (verdict["stalled_verdict"]
+            # M3 acceptance: B is about recovery actually happening -
+            # LLM proposed recover_task AND the C ladder returned
+            # "recovered". stalled_verdict stays informational (the serial
+            # log truncates report text, so it under-detects).
+            verdict["pass"] = (verdict["recover_called"]
+                               and verdict["recovered"]
                                and not verdict["net_fail"])
         else:  # C: before M4 lands, a stall verdict alone is partial credit
             verdict["pass"] = verdict["stalled_verdict"]
