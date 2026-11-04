@@ -78,6 +78,11 @@ def parse_log(path):
     recover_called = "Executing tool: recover_task" in txt
     # The tool's own one-line verdict. Short line, never truncated.
     recovered_result = '"result":"recovered"' in txt
+    # C-ladder terminal verdicts: the fault survived L1 and re-manifested
+    # after L2, so the ladder marked the target needs_human (or the
+    # recurrence watch caught a relapse after a successful rung).
+    escalated_result = ('"result":"needs_human"' in txt
+                        or '"result":"recurred"' in txt)
     # The verdict comes from the agent's own report (write_file tool call),
     # not from boot noise: match hints only inside report content. Tool-call
     # args are truncated in the serial log (~512 B), so capture whatever
@@ -126,7 +131,7 @@ def parse_log(path):
     return {
         "status": status, "iters": iters, "net_fail": net_fail,
         "recover_called": recover_called, "stalled_verdict": stalled_verdict,
-        "recovered": recovered_result,
+        "recovered": recovered_result, "escalated": escalated_result,
         "maxfree": maxfree,
         "oom": oom_count,
         "req_peak": req_peak,
@@ -182,8 +187,14 @@ def main():
             verdict["pass"] = (verdict["recover_called"]
                                and verdict["recovered"]
                                and not verdict["net_fail"])
-        else:  # C: before M4 lands, a stall verdict alone is partial credit
-            verdict["pass"] = verdict["stalled_verdict"]
+        else:  # C: L1 ineffective -> L2 restart -> fault re-manifests ->
+            # escalate to human. Pass = the ladder ran AND reached a
+            # terminal escalated verdict AND not a network round. (Before
+            # M4 the ladder ends at needs_human; once L3 lands "recurred"
+            # after L2 is the other accepted terminal.)
+            verdict["pass"] = (verdict["recover_called"]
+                               and verdict.get("escalated", False)
+                               and not verdict["net_fail"])
         results.append(verdict)
         print(json.dumps(verdict), flush=True)
         if args.json:
