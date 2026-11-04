@@ -40,7 +40,7 @@ static int g_head;
 static int g_tail;
 static int g_count;
 static volatile int g_consumer_on = 1;
-static int g_bug; /* the code bug: FIFO count drifts and never recovers */
+static int g_bug; /* the code bug: the drain path never releases the count */
 static unsigned long g_produced;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -59,12 +59,7 @@ static void fifo_put(unsigned char c)
     pthread_mutex_lock(&g_lock);
     g_fifo[g_head] = c;
     g_head = (g_head + 1) % FIFO_SIZE;
-    /* The code bug ("bug" mode): the accounting drifts by one extra per
-     * put. The consumer drains one per tick but g_count grows by two, so
-     * the FIFO hits full and the producer blocks forever — a fault that
-     * survives SIGUSR1 and re-manifests after restart. The fix-version
-     * ELF (M4 hotfix) simply increments once. */
-    g_count += g_bug ? 2 : 1;
+    g_count++;
     g_produced++;
     pthread_mutex_unlock(&g_lock);
 }
@@ -100,7 +95,17 @@ static void *consumer_thread(void *arg)
         pthread_mutex_lock(&g_lock);
         if (g_consumer_on && g_count > 0) {
             g_tail = (g_tail + 1) % FIFO_SIZE;
-            g_count--;
+            /* The code bug ("bug" mode): the drain path forgets to
+             * release the slot, so g_count only ever grows. The FIFO
+             * reports full forever and the producer deadlocks — a fault
+             * that survives SIGUSR1 (the consumer is already running)
+             * and re-manifests after restart. The fix-version ELF (M4
+             * hotfix) simply decrements here. An earlier revision put
+             * the bug in fifo_put (+2 per put) instead; scenario C
+             * (m3-C.r1, 2026-11-04) proved that variant inert — with
+             * the drain still decrementing, the count oscillates near
+             * full and the producer is only throttled, never stuck. */
+            g_count -= g_bug ? 0 : 1;
         }
         pthread_mutex_unlock(&g_lock);
         usleep(20000);
@@ -201,7 +206,7 @@ int main(int argc, char *argv[])
 
     if (argc > 1 && strcmp(argv[1], "bug") == 0) {
         g_bug = 1;
-        printf("buggy_app: code bug active, FIFO accounting will drift\n");
+        printf("buggy_app: code bug active, FIFO count will never drain\n");
     }
 
     /* L1 soft-recovery hook: recover_task sends SIGUSR1 to re-enable
