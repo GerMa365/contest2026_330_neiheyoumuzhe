@@ -152,3 +152,21 @@
   消掉 4 条 orphan 警告，做到"全部通过"），随后本地提交，等 Ghee 确认再推送。
 - 需要 Ghee 做什么：无需决策；如不同意"11-03 含 103 条尾部事件"或"补登记两个
   孤儿文件"，在替换前说一声即可（重导脚本可一键重生成）。
+
+## 2026-11-05 00:23 · 推送完成，PR 创建被 fine-grained token 权限拒绝
+- 现象：`feature/closed-loop` 已推送到 fork（`d363965..cf7bfb1`，15 个提交，
+  含演示视频 docs/视频.7z）；调 GitHub REST API 在
+  `open-vela/contest2026_330_neiheyoumuzhe` 建 PR 返回 403
+  `Resource not accessible by personal access token`——本地 ~/.git-credentials
+  里的 fine-grained PAT 对 base 仓库没有 Pull requests 写权限。
+- 已尝试 / 已排除的假设：gh CLI 未安装；GitHub MCP 未配置；同一凭据
+  `git push fork` 成功（对 fork 有写权限）；base 分支 `dev-ai-contest-2026`
+  存在；`head=GerMa365:feature/closed-loop` 已在 fork 上（15 个提交）。
+- 我建议的下一步（列出选项与各自风险）：
+  1. Ghee 点 compare 链接一键建 PR（最省事、不动凭据）：
+     https://github.com/open-vela/contest2026_330_neiheyoumuzhe/compare/dev-ai-contest-2026...GerMa365:feature/closed-loop
+     （标题/正文我已备好，见会话汇报；带预填参数的长链接也一并给出）。
+  2. 给现有 PAT 增加对 base 仓库的 Pull requests: write（或换 classic `repo` PAT）
+     后我重试 API（风险：凭据权限扩大，需自行权衡；用完可收回）。
+  3. Ghee 在 GitHub 网页手动建 PR，标题/正文粘贴我给的文本。
+- 需要 Ghee 做什么：三选一即可；选项 1 两步（点链接 → Create pull request）。
