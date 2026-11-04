@@ -17,15 +17,30 @@
 #
 # Board reset: press the board's physical RST button (the video can
 # show it) - RTS/DTR from the terminal goes to the PTY, not the port.
+# The USB link on this board drops and re-enumerates on reset (the
+# ttyACM number can even change), so reads/writes retry with re-open
+# exactly like serial_run.py; the PTY stays up throughout.
 import argparse
+import glob
 import os
 import pty
 import select
 import sys
+import time
 
 import serial
 import termios
 import tty
+
+
+def open_port(baud):
+    """Re-locate and open the board port; None while it is gone."""
+    for p in sorted(glob.glob("/dev/ttyACM*")):
+        try:
+            return serial.Serial(p, baud, timeout=0)
+        except serial.SerialException:
+            continue
+    return None
 
 
 def main():
@@ -36,9 +51,15 @@ def main():
     ap.add_argument("--log", required=True)
     args = ap.parse_args()
 
-    ser = serial.Serial(args.port, args.baud, timeout=0)
+    ser = open_port(args.baud)
     mfd, sfd = pty.openpty()
     tty.setraw(mfd)
+    # SiliconLoop: raw mode must be set on the SLAVE, whose line
+    # discipline is what echoes. With ECHO on, every board->terminal
+    # byte is echoed back into the master and this loop forwards it to
+    # the board as keyboard input (boot banner text became garbage
+    # commands on the 2026-11-04 demo attempt 1).
+    tty.setraw(sfd)
     # expose the slave under a stable path for the terminal
     slave = os.ttyname(sfd)
     try:
@@ -50,26 +71,59 @@ def main():
           flush=True)
 
     logf = open(args.log, "ab", buffering=0)
-    fds = [ser.fileno(), mfd]
     try:
         while True:
-            r, _, _ = select.select(fds, [], [])
-            if ser.fileno() in r:
-                data = ser.read(4096)
+            fds = [mfd] + ([ser.fileno()] if ser else [])
+            r, _, _ = select.select(fds, [], [], 1.0)
+            if ser and ser.fileno() in r:
+                try:
+                    data = ser.read(4096)
+                except (serial.SerialException, OSError):
+                    # board reset: the port dropped. Re-locate and retry;
+                    # the terminal side never notices.
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    ser = None
+                    time.sleep(1.0)
+                    continue
                 if data:
                     logf.write(data)      # watcher sees board output
-                    os.write(mfd, data)   # terminal sees board output
+                    try:
+                        os.write(mfd, data)   # terminal sees board output
+                    except OSError:
+                        pass
             if mfd in r:
                 data = os.read(mfd, 4096)
                 if data:
-                    ser.write(data)       # keyboard -> board
+                    for _ in range(5):
+                        if ser is None:
+                            time.sleep(1.0)
+                            ser = open_port(args.baud)
+                            if ser is None:
+                                continue
+                        try:
+                            ser.write(data)   # keyboard -> board
+                            break
+                        except (serial.SerialException, OSError):
+                            try:
+                                ser.close()
+                            except Exception:
+                                pass
+                            ser = None
+                            time.sleep(1.0)
     except KeyboardInterrupt:
         pass
     finally:
         logf.close()
         os.close(mfd)
         os.close(sfd)
-        ser.close()
+        if ser:
+            try:
+                ser.close()
+            except Exception:
+                pass
         try:
             os.unlink(args.pty)
         except FileNotFoundError:
