@@ -105,3 +105,98 @@ post_delta=50 → 120s 复现观察内未复发 → recovered。无一轮走到 
 - verify 轮（0018 板上验证）：m3-overnight-01.md 引用的 m3-B-verify.r1。
 - 本目录 `m3-b2/m3-B2.r1–r10` + `m3-b2/verdicts-b2.jsonl` 为验收原件
   （副本，原件在 `~/claude_work/日志/2026-11-04/m3-overnight/`）。
+
+## 场景 C：暴露缺陷 → 修复 → 重跑（2026-11-04）
+
+预期链路（closed-loop-plan §四）：bug 模式下 L1 无效 → L2 重启 →
+故障复现 → 升级给人（needs_human）。
+
+### C 第一次运行（m3-c/，0015–0019 固件）：两处缺陷暴露
+
+- **缺陷 1：bug 模式是惰性的（r1 实证）**。当时机制是 fifo_put
+  `g_count += 2`（记账漂移），但消费者仍每 tick 递减——计数在满值
+  附近震荡，生产者只是被限速，从未死锁。r1 心跳 3550 → 3850
+  （Δ=300），诊断正确判定 healthy、不处置（判 healthy 是诊断的
+  正确行为，错在注入的故障不成立）。r2 同形态（r2 为停止旧回归时
+  截断的完整诊断轮，END status=ok）。
+- **缺陷 2：L2 重启路径的目标从未存在（代码核查）**。
+  `posix_spawn("/data/ai_agent/bin/buggy_app")` 指向一个从未部署的
+  文件——buggy_app 是 NuttX 内建应用，没有任何流程把 ELF 放到
+  /data（tmpfs，复位即空）。即使 bug 模式成立，L2 也永远走不到。
+
+两处均为功能性缺陷（非误处置、不触发底线），按"优先修 bug"处理：
+
+| 修复 | 提交 | 内容 |
+| --- | --- | --- |
+| bug 真死锁 | ce4c05d | 故障移到排水路径（`g_count -= g_bug ? 0 : 1`）：计数只增不减，FIFO 永久报满、生产者死等；SIGUSR1 无效（消费者本来就开着）、重启后复现。修复版 = 补回一次递减（单行），与 M4 热修复形态一致 |
+| L2 回退内建名 | 1684e45（补丁 0020） | respawn 先试部署路径，失败则按内建注册名 "buggy_app" 重启同一 workload |
+
+m3-c/ 的 r1、r2 保留为缺陷暴露证据（原件
+~/claude_work/日志/2026-11-04/m3-c/）。
+
+### C 重跑（m3-c2/，0015–0020 固件）
+
+判据（scenario.py，本次同步收紧）：recover_called 且判定行到达
+终态 needs_human/recurred 且非网络轮。900s 窗口 × 5 轮，每轮硬
+复位；预期判定行
+`{"level":2,...,"result":"needs_human"}`（L1 3s + L2 6s 后阶梯用尽），
+L2 后同一 bug 在新进程里 <1s 复现（复现证据 = post_delta=0）。
+
+| 轮 | cause | 判定行 | L1 | L2 重启+复现 | 升级 | OOM | 拦截 | pass |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| r1 | net_llm* | needs_human L2 | 无效 | ✅（横幅×2） | ✅ | 0 | 0 | ✅ |
+| r2 | net_llm* | needs_human L2 | 无效 | ✅ | ✅ | 0 | 0 | ✅ |
+| r3 | net_llm* | needs_human L2 | 无效 | ✅ | ✅ | 0 | 0 | ✅ |
+| r4 | net_llm* | needs_human L2 | 无效 | ✅ | ✅ | 0 | 0 | ✅ |
+| r5 | net_llm* | needs_human L2 | 无效 | ✅ | ✅ | 0 | 0 | ✅ |
+
+5 轮判定行逐字一致：
+
+```
+{"level":2,"action":"restart","target":"buggy_app","pre_delta":0,"post_delta":0,"result":"needs_human"}
+```
+
+每轮 `buggy_app: code bug active` 启动横幅出现两次（注入一次 +
+recover_task 内 L2 重启一次），即 L2 确实拉起了新进程、bug 在新
+进程里复现（post_delta=0）。**计数口径：处置正确 5/5，报告写入
+0/5**（*：收尾写报告的 LLM 调用失败，见下节；不是闭环功能失败）。
+
+### 收尾 LLM 调用失败的调查（2026-11-04，按证据归类）
+
+C 重跑 5/5 轮在处置完成后的收尾 LLM 调用瞬时失败（latency=0ms，
+failover 单后端无处可去，会话以 fail 收尾、report.md 未写）；
+B 重跑 10 轮中 r9 有同款失败（`Write request failed: -5`）。
+逐层核对源码与原始日志后的结论：
+
+**已证实：**
+
+1. **-5 是分配失败，不是网络写失败**。`Write request failed` 打印
+   的是 `tls_write_request` 返回值，`VELA_TLS_ERR_OVERFLOW = -5`
+   （vela_tls.h:34）在其 `malloc(4096)` 头缓冲失败时返回
+   （vela_tls.c:455-457）——B r9 失败在握手成功之后的**分配**。
+2. **C 的失败根本没进网络层**。5/5 轮失败调用前无任何
+   `[vela_tls]` 行（无 Handshake/Reusing/Write），失败路径上
+   唯一无日志的出口是响应缓冲 `calloc(8KB)` 失败
+   （llm_proxy.c:446 → resp_buf_init:171-173，静默返回）或
+   连接建立期的 mbedtls 分配失败（同样静默）。
+3. **与"复用已断的 keep-alive 连接"无关**。0011 已实现 30 秒
+   闲置淘汰（AGENT_TLS_POOL_MAX_IDLE_SEC=30）：B r9 失败前恰是
+   一次全新握手（`Handshake start: UNIX=1793759582`，Handshake OK
+   之后才失败）；成功的收尾调用两种形态都有（闲置 <30s 复用、
+   >30s 重建）。闲置时长在成功与失败样本间重叠，不是区分量。
+4. **堆水位是区分量**。C 轮会话末段只剩 ~19KB free
+   （`Low memory: 19256 bytes free, skipping` 连续出现），B 轮
+   同位置 ~25KB；C 5/5 失败与 B 1/10 与水位一致。三例失败全部
+   落在分配点，无一例 socket/TLS 线材错误（无 EPIPE/ECONNRESET）。
+
+**推测（机制未证实）：** C 轮堆更差的驱动是 bug 模式死锁后生产者
+1ms 自旋持续占核（设计使然；stall 模式同款自旋但会被 L1 解开）+
+900s 窗内心跳轮次更多，收包缓冲堆积（netpkt_alloc_fail 密集）。
+
+**决定（15:30 时间盒，14:00 做出）：不改代码。**理由：① 证据否定
+"发送阶段失败→重连重试"的修复前提（没有发送阶段失败可重试——
+失败在分配层，failover 的重试已证明同样失败）；② 真正的修复面在
+内存侧（响应缓冲静态化、自旋间隔），超出最小修复授权，且 17:30
+前无法完成"修复+验证（C×2+B×5+A×5）+演示"；③ 按约定作为已知
+局限记录（本节与 docs/roadmap.md 附注），底线未触发（OOM 计数指
+请求体序列化，0；校验器拦截 0）。
