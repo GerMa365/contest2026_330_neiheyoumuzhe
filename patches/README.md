@@ -817,3 +817,51 @@ needs_confirm），scenario.py 的 `"result":"recovered"` 计数有据可依。
 - 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
 - 板上验证：B 场景重跑各轮日志含 verdict 行，见
   docs/evidence/2026-11-04/m3-acceptance.md。
+
+# 0020-ai-agent-l2-spawn-builtin-fallback.patch
+
+## 性质：缺陷修复（M3 场景 C 暴露），增量补丁
+
+0017 的续篇（应用顺序 0015 → 0016 → 0017 → 0018 → 0019 → 0020），只改
+tool_recover.c（0017 新增该文件，0018 未触碰）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0019 应用后的 tool_recover.c。
+
+## 解决的问题
+
+L2 重启阶梯的 posix_spawn 永远失败：目标路径
+`/data/ai_agent/bin/buggy_app` 从未存在。buggy_app 是 NuttX 内建应用
+（builtin），没有 ELF 部署到 /data；/data 是 tmpfs 每次上电清空，
+即便部署过也活不过复位。于是"重启任务"这一级永远走不到，
+bug 模式无法演示 L1 无效 → L2 重启 → 复现 → 升级给人。
+
+## 根因
+
+L2 按 m2-wip-design 的部署步骤设计（`apps/bin/buggy_app` → 板上
+`/data/ai_agent/bin/`，L2 重启用），但该部署步骤从未纳入自动化
+流程；设计文档也没有覆盖"部署缺失时怎么办"。
+
+## 解法
+
+respawn() 先按原设计 posix_spawn 部署路径；失败则回退用内建注册名
+"buggy_app" 再试一次。两条路都经 posix_spawn，argv 保留 mode 参数，
+重启后的进程复现同一 workload。
+
+## 局限
+
+- 内建名回退依赖 builtin binfmt 按名查找（上游 NuttX 支持；若
+  openvela 有差异会在板测暴露）。
+- 持久化的修复版 ELF 部署仍属 M4（/data tmpfs 问题见
+  docs/m4-design.md），本补丁只保证 L2 在无部署时也能重启。
+
+## 验证记录
+
+- 干净副本全链 0007 → … → 0020 `git apply` 通过（2026-11-04）。
+- 板上验证：场景 C（bug 模式）重跑，数据见
+  docs/evidence/2026-11-04/m3-acceptance.md 的场景 C 一节。

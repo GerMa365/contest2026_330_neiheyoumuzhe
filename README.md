@@ -84,7 +84,7 @@ contest2026_330_neiheyoumuzhe/
 
 ## 四、补丁清单
 
-18 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
+19 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
 
 | 补丁 | 目标仓库 | 内容 |
 |---|---|---|
@@ -106,6 +106,7 @@ contest2026_330_neiheyoumuzhe/
 | 0017 | `packages/ai_agent` | recover_task 处置工具（守卫 + 阶梯 + 复核） |
 | 0018 | `packages/ai_agent` | 诊断 Skill v2：处置步骤先于报告写入 |
 | 0019 | `packages/ai_agent` | recover_task 判定行输出到串口日志 |
+| 0020 | `packages/ai_agent` | L2 重启回退内建名（ELF 未部署时仍可重启） |
 
 每个补丁的现象、根因、解法、局限与验证记录见
 [patches/README.md](patches/README.md)。
@@ -150,7 +151,7 @@ git apply ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-e
 
 # packages/ai_agent
 cd <openvela>/packages/ai_agent
-for p in 0007 0008 0009 0010 0011 0012 0015 0016 0017 0018 0019; do
+for p in 0007 0008 0009 0010 0011 0012 0015 0016 0017 0018 0019 0020; do
   git apply ../../contest2026_330_neiheyoumuzhe/patches/$p-*.patch
 done
 ```
