@@ -112,6 +112,7 @@ contest2026_330_neiheyoumuzhe/
 │   ├── product-introduction.md  作品介绍（PDF 版一并提交）
 │   ├── technical-deep-dive.md   两个技术成果的定位过程
 │   ├── video-script.md          演示视频脚本
+│   ├── 视频.7z                  演示视频（2026-11-04 真机串口录屏，内含 11月4日.mp4）
 │   └── evidence/                板上实测原始日志与统计，见其 README
 └── logs/                        AI Coding 日志（仅收尾阶段，见第七节）
 ```
