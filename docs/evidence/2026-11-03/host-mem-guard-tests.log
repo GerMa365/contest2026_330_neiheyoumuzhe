@@ -1,0 +1,16 @@
+== T1: reasoning truncation (10000 B CJK input) ==
+   capped to 308 B
+== T2: tool-output truncation (10000 B CJK input) ==
+[syslog] [agent] Tool result capped: 10000 -> 1579 bytes
+   capped to 1579 B
+== T3: short input passthrough ==
+== T4: >20 KB request hits heap fallback ==
+[syslog] [hosttest] request exceeds 20480 B static buffer, heap fallback
+   is_static=0, bytes=25011
+== T5: small request uses the static buffer ==
+ALL TESTS PASSED
+python json.loads OK: reasoning.json
+python json.loads OK: tool.json
+python json.loads OK: req_big.json
+python json.loads OK: req_small.json
+HOST GUARD TESTS: ALL GREEN

@@ -1,0 +1,56 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0018] ai-agent: skill v2 - make the recover_task step explicit
+
+Incremental on 0017 (skill_loader.c already touched there). The M2/M3
+skill told the model to "propose recover_task when the judgement is
+stall" but the step list ended at "5. write_file the report" - and a
+report write is a terminal local-tool shortcut in agent_loop, so the
+model never got a round where it could call the tool. The 11-04
+overnight B rounds confirmed it: 3/3 completed diagnoses judged stall
+correctly, 0/3 called recover_task (0 recoveries).
+
+Fix: step 5 becomes the conditional recover_task call (resume on
+buggy_app, only on a stall verdict) and the report write moves to step
+6, so the action happens BEFORE the terminal write. The inline skills
+summary (B3) gets the same step and now names all six report sections -
+it was listing only four, so heartbeat reports were four-section.
+
+Skills summary grows ~230 B to ~1.47 KB (skills_buf is 1536 B); the
+existing clamp keeps a truncation from writing out of bounds.
+
+Verified on board 2026-11-04: B round shows recover_task executed and
+{"result":"recovered"} (see docs/evidence/2026-11-04/).
+--- a/src/tools/skill_loader.c
++++ b/src/tools/skill_loader.c
+@@ -123,7 +123,11 @@
+     "2. run_shell \"ps\" - every task and its state\n" \
+     "3. run_shell \"free\" - heap total, used, free\n" \
+     "4. read_file " AGENT_DATA_DIR "/evidence/heartbeat.txt again\n" \
+-    "5. write_file the report to " AGENT_DATA_DIR "/evidence/report.md\n\n" \
++    "5. If the judgement below is stall: call recover_task once with " \
++    "action \"resume\" and target \"buggy_app\", and record its one-line " \
++    "JSON result. Skip this step on healthy or when the file is " \
++    "missing.\n" \
++    "6. write_file the report to " AGENT_DATA_DIR "/evidence/report.md\n\n" \
+     "## How to judge\n" \
+     "The heartbeat counter is the primary signal.\n" \
+     "- Value increased between step 1 and step 4: the monitored task " \
+@@ -443,10 +447,15 @@
+                 "  1) read_file %s/evidence/heartbeat.txt; "
+                 "2) run_shell \"ps\"; 3) run_shell \"free\"; "
+                 "4) read_file heartbeat.txt again; "
+-                "5) write_file the report to "
+-                "%s/evidence/report.md with sections "
++                "5) if delta is 0 (stall): call recover_task once "
++                "(action \"resume\", target \"buggy_app\"), keep its JSON; "
++                "6) write_file the report to "
++                "%s/evidence/report.md with six sections: "
+                 "**Observed Evidence**, **Hypothesis**, **Confidence**, "
+-                "**Proposed Test or Fix**. Judge by heartbeat delta: "
++                "**Recovery Action** (tool verdict or None), "
++                "**Verification** (post-action delta), "
++                "**Proposed Test or Fix**. "
++                "Judge by heartbeat delta: "
+                 "increased=healthy, identical=stall.\n",
+                 title, desc, AGENT_DATA_DIR, AGENT_DATA_DIR);
+         } else {

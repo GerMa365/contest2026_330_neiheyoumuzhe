@@ -1,0 +1,10 @@
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 35656, "agent_start_free": 160976, "round": 1, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": null, "agent_start_free": 160976, "round": 2, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 30408, "agent_start_free": 160976, "round": 3, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": null, "agent_start_free": 160976, "round": 4, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": null, "agent_start_free": 160976, "round": 5, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 30472, "agent_start_free": 160976, "round": 6, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 30232, "agent_start_free": 160976, "round": 7, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 44184, "agent_start_free": 160976, "round": 8, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 30264, "agent_start_free": 160976, "round": 9, "scenario": "A", "session_rc": 0, "pass": true}
+{"status": "ok", "iters": 7, "net_fail": false, "recover_called": false, "stalled_verdict": false, "maxfree": 28184, "agent_start_free": 160976, "round": 10, "scenario": "A", "session_rc": 0, "pass": true}

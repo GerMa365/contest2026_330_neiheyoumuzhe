@@ -1,0 +1,245 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0016] ai-agent: request-tree hardening and alloc guards
+
+Incremental on 0015. tree checks + allocation-failure instrumentation
+for the request assembly path; message-name fixes for strict API
+validators; ownership-safe tools cache and message attach.
+
+diff --git a/src/core/agent_loop.c b/src/core/agent_loop.c
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -322,6 +322,10 @@
+         cJSON* result_msg = cJSON_CreateObject();
+         cJSON_AddStringToObject(result_msg, "role", "tool");
+         cJSON_AddStringToObject(result_msg, "tool_call_id", call->id);
++        /* name is optional in the OpenAI spec but MiMo's validator has
++         * started rejecting tool messages without it ("`name` is not
++         * set", m1-50round-v2.r1) — always carry it. */
++        cJSON_AddStringToObject(result_msg, "name", call->name);
+         cJSON_AddStringToObject(result_msg, "content",
+             cap_tool_content(tool_output));
+         cJSON_AddItemToArray(messages, result_msg);
+@@ -401,6 +405,7 @@
+             cJSON_AddStringToObject(result_msg, "role", "tool");
+             cJSON_AddStringToObject(result_msg, "tool_call_id",
+                 resp->calls[i].id);
++            cJSON_AddStringToObject(result_msg, "name", resp->calls[i].name);
+             cJSON_AddStringToObject(result_msg, "content",
+                 (tasks[i].output && tasks[i].output[0])
+                     ? cap_tool_content(tasks[i].output)
+diff --git a/src/llm/llm_proxy.c b/src/llm/llm_proxy.c
+--- a/src/llm/llm_proxy.c
++++ b/src/llm/llm_proxy.c
+@@ -64,8 +64,74 @@
+  * window; llm calls funnel through the single agent loop task so it is
+  * uncontended in practice. Every req_serialize() pairs with exactly one
+  * req_release(). */
++/* TESTABLE: alloc-guard begin */
++/* SiliconLoop (2026-11-03 hypothesis): cJSON swallows allocation
++ * failures — cJSON_AddStringToObject/cJSON_Duplicate just don't add the
++ * field when malloc returns NULL, so a starved heap silently produces a
++ * request tree with missing fields (the 400 "name/function is not set"
++ * class). Count failures per request to test this. */
++static unsigned s_alloc_fail;
++static unsigned s_alloc_fail_logged;
++
++static void* counting_malloc(size_t sz)
++{
++    void* p = malloc(sz);
++    if (!p) {
++        s_alloc_fail++;
++    }
++    return p;
++}
++
++static void counting_free(void* p)
++{
++    free(p);
++}
++
++unsigned llm_alloc_fail_count(void)
++{
++    return s_alloc_fail;
++}
++
++static void install_alloc_hooks(void)
++{
++    static cJSON_Hooks hooks;
++    hooks.malloc_fn = counting_malloc;
++    hooks.free_fn = counting_free;
++    cJSON_InitHooks(&hooks);
++}
++
++/* Pre-send sanity: a request tree missing tool names or message roles
++ * must never reach the wire (kept regardless of the alloc hypothesis). */
++static int validate_request_tree(cJSON* body)
++{
++    cJSON* tools = cJSON_GetObjectItem(body, "tools");
++    if (tools && cJSON_IsArray(tools)) {
++        cJSON* t;
++        cJSON_ArrayForEach(t, tools) {
++            cJSON* fn = cJSON_GetObjectItem(t, "function");
++            cJSON* nm = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
++            if (!fn || !nm || !cJSON_IsString(nm) || !nm->valuestring[0]) {
++                return ERROR;
++            }
++        }
++    }
++    cJSON* msgs = cJSON_GetObjectItem(body, "messages");
++    if (!msgs || !cJSON_IsArray(msgs) || cJSON_GetArraySize(msgs) == 0) {
++        return ERROR;
++    }
++    cJSON* m;
++    cJSON_ArrayForEach(m, msgs) {
++        cJSON* role = cJSON_GetObjectItem(m, "role");
++        if (!role || !cJSON_IsString(role)) {
++            return ERROR;
++        }
++    }
++    return OK;
++}
++/* TESTABLE: alloc-guard end */
++
+ /* TESTABLE: req-buf begin */
+-static char s_req_buf[20480];
++static char s_req_buf[16384]; /* 16 KB: max observed request 12.7 KB */
+ static pthread_mutex_t s_req_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
+ static char* req_serialize(cJSON* body, bool* is_static)
+@@ -145,6 +211,7 @@
+ 
+ int llm_proxy_init(void)
+ {
++    install_alloc_hooks();
+     if (AGENT_SECRET_API_KEY[0])
+         strncpy(s_api_key, AGENT_SECRET_API_KEY, sizeof(s_api_key) - 1);
+     if (AGENT_SECRET_MODEL[0])
+@@ -755,26 +822,60 @@
+             AGENT_LLM_MAX_TOKENS);
+     }
+ 
+-    /* Clone messages and prepend system message */
+-    cJSON* msgs = cJSON_Duplicate(messages, 1);
+-    cJSON* sys_msg = cJSON_CreateObject();
++    /* SiliconLoop: no cJSON_Duplicate of the message tree — the deep copy
++     * costs as much transient heap as the tree itself and a starved heap
++     * fails silently (fields go missing, the 400 "name/function is not
++     * set" class). Attach the caller's array in place and give it back
++     * before tearing the body down. Same for the tools array: build it
++     * once and reuse across requests (its schema tree is ~10 KB). */
++    static cJSON* s_tools_cache;
++    static char* s_tools_key;
++    if (!s_tools_cache || !s_tools_key
++        || strcmp(s_tools_key, tools_json ? tools_json : "") != 0) {
++        cJSON_Delete(s_tools_cache);
++        free(s_tools_key);
++        s_tools_cache = tools_json ? build_openai_tools_array(tools_json)
++                                  : NULL;
++        s_tools_key = tools_json ? strdup(tools_json) : NULL;
++    }
+ 
++    cJSON* sys_msg = cJSON_CreateObject();
+     cJSON_AddStringToObject(sys_msg, "role", "system");
+     cJSON_AddStringToObject(sys_msg, "content", system_prompt);
+-    cJSON_InsertItemInArray(msgs, 0, sys_msg);
+-    cJSON_AddItemToObject(body, "messages", msgs);
+-
+-    /* Convert tools to OpenAI format */
+-    cJSON* tools_arr = build_openai_tools_array(tools_json);
++    cJSON_InsertItemInArray(messages, 0, sys_msg);
++    cJSON_AddItemToObject(body, "messages", messages);
++    if (s_tools_cache) {
++        cJSON_AddItemToObject(body, "tools", s_tools_cache);
++    }
+ 
+-    if (tools_arr) {
+-        cJSON_AddItemToObject(body, "tools", tools_arr);
++    int tree_ok = validate_request_tree(body);
++    if (tree_ok == OK && tools_json
++        && !cJSON_GetObjectItem(body, "tools")) {
++        tree_ok = ERROR; /* the whole tools array went missing */
+     }
+ 
+     bool post_is_static = false;
+-    char* post_data = req_serialize(body, &post_is_static);
++    char* post_data = (tree_ok == OK)
++        ? req_serialize(body, &post_is_static) : NULL;
+ 
++    /* give the borrowed trees back before tearing the body down */
++    cJSON_DetachItemViaPointer(body, messages);
++    {
++        cJSON* sys_back = cJSON_DetachItemFromArray(messages, 0);
++        cJSON_Delete(sys_back);
++    }
++    if (s_tools_cache) {
++        cJSON_DetachItemViaPointer(body, s_tools_cache);
++    }
+     cJSON_Delete(body);
++
++    if (tree_ok != OK) {
++        syslog(LOG_ERR,
++            "[%s] request tree incomplete (alloc_fail=%u)\n",
++            TAG, s_alloc_fail);
++        return ERROR;
++    }
++
+     if (!post_data) {
+         req_release(NULL, false);
+         syslog(LOG_ERR,
+@@ -782,9 +883,13 @@
+         return ERROR;
+     }
+ 
++    unsigned af = s_alloc_fail;
++    unsigned afd = af - s_alloc_fail_logged;
++    s_alloc_fail_logged = af;
+     syslog(LOG_INFO,
+-        "[%s] OpenAI API with tools (model: %s, %d bytes)\n",
+-        TAG, model, (int)strlen(post_data));
++        "[%s] OpenAI API with tools (model: %s, %d bytes, "
++        "alloc_fail=%u +%u)\n",
++        TAG, model, (int)strlen(post_data), af, afd);
+ 
+     resp_buf_t rb = { 0 };
+     int status = 0;
+@@ -816,11 +921,22 @@
+         memset(&rb, 0, sizeof(rb));
+     }
+ 
+-    req_release(post_data, post_is_static);
+-
+     if (status != 200) {
+         syslog(LOG_ERR, "[%s] API error %d: %.500s\n", TAG, status,
+             rb.data ? rb.data : "");
++        /* SiliconLoop: park the rejected body so the exact offending
++         * object can be inspected (API 400s on 11-03 needed this).
++         * Dump BEFORE req_release: post_data points into the shared
++         * static buffer and must not be read after ownership ends. */
++        FILE* dump = fopen(AGENT_DATA_DIR "/evidence/last_request.json", "w");
++        if (dump) {
++            fputs(post_data, dump);
++            fclose(dump);
++        }
++    }
++    req_release(post_data, post_is_static);
++
++    if (status != 200) {
+         resp_buf_free(&rb);
+         return ERROR;
+     }
+diff --git a/src/llm/llm_parse.c b/src/llm/llm_parse.c
+--- a/src/llm/llm_parse.c
++++ b/src/llm/llm_parse.c
+@@ -74,6 +74,12 @@
+ 
+         if (name && cJSON_IsString(name)) {
+             cJSON_AddStringToObject(func, "name", name->valuestring);
++        } else {
++            /* a nameless tool def would make the API reject the whole
++             * request ("`name` is not set") — skip it instead */
++            syslog(LOG_WARNING, "[%s] skipping nameless tool def\n", TAG);
++            cJSON_Delete(wrapper);
++            continue;
+         }
+         if (desc && cJSON_IsString(desc)) {
+             cJSON_AddStringToObject(func, "description",

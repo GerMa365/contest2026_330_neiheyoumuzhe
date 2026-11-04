@@ -1,0 +1,252 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0021] ai-agent: fallback report when the report LLM call fails
+
+Incremental on 0019/0020 (the verdict line supplies the fields). When
+recover_task has run but the follow-up LLM call that writes report.md
+fails (tail failures: request-body allocation at low heap, seen 5/5 in
+scenario C and 1/10 in scenario B), no report was left behind at all.
+Now the C code pre-renders a report from the verdict fields into a
+static buffer at verdict time (zero heap) and writes it via
+open/write/close only when (the ladder ran this session) and (no
+normal report.md was written this session) and (the session ends on a
+terminal LLM failure). A successful write_file on report.md and the
+start of a new session both disarm it. The report carries the verdict
+fields, target, time and a rule-derived conclusion line (L1 recovery =
+temporary stall; L2 restart recovery = task replaced; ladder exhausted
+= code defect), plus the marker "LLM unavailable: fallback report".
+
+Verified 2026-11-04: host tests (ASan/UBSan, 6 cases incl. no-overwrite
+and one-shot) green; scenario C board rounds write the fallback report
+in 3/3 rounds (docs/evidence/2026-11-04/m3-fallback/ and
+m3-acceptance.md).
+--- a/src/tools/tool_recover.h
++++ b/src/tools/tool_recover.h
+@@ -16,6 +16,18 @@
+  * and cooldown state without rebooting. */
+ void tool_recover_reset(void);
+ 
++/* Fallback report (2026-11-04 tail-failure mitigation): when the ladder
++ * ran this session but the follow-up LLM call that writes report.md
++ * fails (allocation failure at low heap), C code fills report.md from a
++ * fixed template so the round still leaves a written report. All state
++ * is static - a rescue path must not allocate. */
++void tool_recover_session_begin(void);
++void tool_recover_write_fallback_report(void);
++
++/* Called by write_file when a report.md write succeeded: the normal
++ * path produced the report, the fallback must never overwrite it. */
++void tool_recover_report_written(void);
++
+ #ifdef __cplusplus
+ }
+ #endif
+--- a/src/tools/tool_recover.c
++++ b/src/tools/tool_recover.c
+@@ -42,6 +42,8 @@
+  * touches a process.
+  ****************************************************************************/
+ 
++#include <errno.h>
++#include <fcntl.h>
+ #include <signal.h>
+ #include <spawn.h>
+ #include <stdio.h>
+@@ -91,6 +93,15 @@
+  * act. */
+ static volatile int s_recovering;
+ 
++/* Fallback report state (2026-11-04 tail-failure mitigation): the LLM
++ * call that writes report.md can fail at low heap AFTER this tool has
++ * run, leaving the round with no written report. When the ladder ran
++ * and no normal report followed, C code writes one from a fixed
++ * template rendered into the static buffer at verdict time. No heap: a
++ * rescue path must not allocate. */
++static char s_fb_report[1024]; /* pre-rendered fallback report body */
++static int s_fb_armed;         /* ladder ran, no report written yet */
++
+ /* Demo unlock (nsh: recover_task reset): clear the needs_human latch
+  * and the cooldown/rate state without rebooting the board. */
+ void tool_recover_reset(void)
+@@ -102,6 +113,92 @@
+     s_recovering = 0;
+ }
+ 
++/* New inbound message: the previous session's recovery must not arm
++ * the fallback for this session's LLM failures. */
++void tool_recover_session_begin(void)
++{
++    s_fb_armed = 0;
++}
++
++/* The normal path wrote report.md; the fallback must never overwrite
++ * it (a later LLM failure in the same session does not mean the report
++ * is missing). */
++void tool_recover_report_written(void)
++{
++    s_fb_armed = 0;
++}
++
++/* Fallback report body: exactly what the C code owns - the verdict
++ * fields, the target, the time, one rule-derived conclusion line and
++ * the failure marker. Rendered at verdict time into the static buffer;
++ * the writer below only dumps it. */
++static const char s_fb_template[] =
++    "# Embedded Self-Diagnostic Report\n"
++    "\n"
++    "LLM unavailable: fallback report (written by recover_task C code\n"
++    "because the LLM call that writes the report failed)\n"
++    "\n"
++    "## Recovery Record\n"
++    "- time: %ld\n"
++    "- target: %s\n"
++    "- level: %d\n"
++    "- action: %s\n"
++    "- pre_delta: %ld\n"
++    "- post_delta: %ld\n"
++    "- result: %s\n"
++    "\n"
++    "## Conclusion\n"
++    "- %s\n";
++
++static void fb_render(const char *target, int level, const char *action,
++    long pre, long post, const char *result)
++{
++    const char *conclusion;
++
++    if (strcmp(result, "recovered") == 0 && level == 1) {
++        /* rule: L1 recovery = a temporary stall */
++        conclusion = "recovered after the L1 (resume) rung: a temporary "
++            "stall; the consumer was re-enabled";
++    } else if (strcmp(result, "recovered") == 0) {
++        conclusion = "recovered after the L2 (restart) rung: the old "
++            "task instance was replaced";
++    } else {
++        /* rule: fault present after L2 = likely code defect */
++        conclusion = "the fault persisted through the L1/L2 ladder "
++            "(incl. L2 restart): a code defect is likely and the "
++            "buggy_app source needs a review";
++    }
++
++    snprintf(s_fb_report, sizeof(s_fb_report), s_fb_template,
++        (long)time(NULL), target, level, action, pre, post, result,
++        conclusion);
++    s_fb_armed = 1;
++}
++
++/* Called by agent_loop on a terminal LLM failure. Writes report.md only
++ * when recover_task ran this session and the normal report did not
++ * follow. open/write/close, no stdio buffering, no heap. */
++void tool_recover_write_fallback_report(void)
++{
++    if (!s_fb_armed) {
++        return;
++    }
++    s_fb_armed = 0; /* one fallback report per recovery */
++
++    int fd = open(EVID_DIR "/report.md",
++        O_WRONLY | O_CREAT | O_TRUNC, 0644);
++    if (fd < 0) {
++        syslog(LOG_ERR, "[%s] fallback report open failed (errno=%d)\n",
++            TAG, errno);
++        return;
++    }
++    size_t len = strlen(s_fb_report);
++    ssize_t w = write(fd, s_fb_report, len);
++    close(fd);
++    syslog(LOG_INFO, "[%s] fallback report written (%zd/%zu bytes)\n",
++        TAG, w, len);
++}
++
+ /* ── heartbeat sampling ─────────────────────────────────────────── */
+ 
+ static int read_heartbeat(long *val)
+@@ -500,6 +597,16 @@
+             "recovered");
+     }
+ 
++    /* Arm the fallback report (2026-11-04): the ladder executed, but
++     * the LLM call that writes report.md can still fail at low heap.
++     * agent_loop then calls tool_recover_write_fallback_report(). */
++    fb_render(target,
++        done_level < 0 ? 2 : done_level + 1,
++        done_level < 0 ? "restart" : level_name[done_level],
++        pre_delta, post_delta,
++        done_level < 0 ? (recurred ? "recurred" : "needs_human")
++                       : "recovered");
++
+     s_recovering = 0;
+     cJSON_Delete(root);
+     return OK;
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -33,6 +33,7 @@
+ #include "llm/llm_router.h"
+ #include "tools/skill_loader.h"
+ #include "tools/tool_guard.h"
++#include "tools/tool_recover.h"
+ #include "tools/tool_registry.h"
+ #include "agent_compat.h"
+ #include "agent_config.h"
+@@ -1230,12 +1231,18 @@
+                 llm_response_free(&resp);
+                 final_text = strdup(LLM_TIMEOUT_MSG);
+                 watchdog_fired = true;
++                /* SiliconLoop: if recover_task ran this session, the
++                 * report-writing LLM call just failed - C code writes
++                 * report.md from its fixed template instead of losing
++                 * the round's report (2026-11-04 tail failures). */
++                tool_recover_write_fallback_report();
+                 break;
+             }
+             syslog(LOG_ERR, "[%s] LLM call failed (iter %d)\n",
+                 TAG, iteration);
+             agent_trace_step(&trace, iteration, NULL, latency_ms, 0);
+             llm_response_free(&resp);
++            tool_recover_write_fallback_report();
+             break;
+         }
+ 
+@@ -1253,6 +1260,7 @@
+             llm_response_free(&resp);
+             final_text = strdup(LLM_TIMEOUT_MSG);
+             watchdog_fired = true;
++            tool_recover_write_fallback_report();
+             break;
+         }
+ 
+@@ -1647,6 +1655,9 @@
+ 
+         syslog(LOG_INFO, "[%s] Processing message from %s:%s\n",
+             TAG, msg.channel, msg.chat_id);
++        /* SiliconLoop: per-message boundary for the fallback report -
++         * last session's recovery must not arm this session's failures. */
++        tool_recover_session_begin();
+ 
+         /* Check memory pressure */
+         agent_mem_get_status(&mem_st);
+--- a/src/tools/tool_files.c
++++ b/src/tools/tool_files.c
+@@ -21,6 +21,7 @@
+  */
+ 
+ #include "tools/tool_files.h"
++#include "tools/tool_recover.h"
+ #include "agent_config.h"
+ #include "agent_compat.h"
+ 
+@@ -241,6 +242,15 @@
+ 
+     snprintf(output, output_size, "OK: wrote %d bytes to %s", (int)written, path);
+     syslog(LOG_INFO, "[%s] write_file: %s (%d bytes)\n", TAG, path, (int)written);
++    /* SiliconLoop: a successful report.md write means the normal path
++     * produced the report; the fallback writer must stand down. */
++    {
++        const char *base = strrchr(path, '/');
++        base = base ? base + 1 : path;
++        if (strcmp(base, "report.md") == 0) {
++            tool_recover_report_written();
++        }
++    }
+     cJSON_Delete(root);
+     return OK;
+ }

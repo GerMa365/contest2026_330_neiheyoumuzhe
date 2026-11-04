@@ -1,0 +1,724 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0017] ai-agent: recover_task tool + recovery ladder (M2/M3)
+
+Incremental on 0016. recover_task (TOOL_SEC_SENSITIVE): guards,
+L1 resume / L2 restart ladder, post-action verification, recurrence
+watch, PID identity check, busy latch, human escalation (L3 deferred
+with M4), recover_task reset/test as human-only CLI verbs; Skill v2
+six-section report; SILOOP_RECOVERY_MODE Kconfig.
+
+--- /dev/null
++++ b/src/tools/tool_recover.c
+@@ -0,0 +1,480 @@
++/****************************************************************************
++ * SiliconLoop - recover_task tool (M2 execution plane)
++ *
++ * The ONLY entry point for recovery actions (red line 7). Per the closed
++ * loop design (docs/closed-loop-plan.md §3.1/3.2):
++ *
++ *   LLM proposes -> deterministic C code decides.
++ *   The LLM only picks action (resume/restart) and target; the guards,
++ *   the recovery ladder, the post-check and the recurrence watch all
++ *   live here.
++ *
++ *   Guards (all in C, in order):
++ *     - needs_human flag: once set (ladder exhausted), all actions refused
++ *     - target whitelist: buggy_app / buggy_app_fixed ONLY
++ *     - cooldown: same target once per heartbeat period (120 s)
++ *     - hourly cap: max 6 actions per target per hour
++ *     - mode: 0=off 1=dry-run 2=confirm 3=auto (Kconfig)
++ *     - independent re-sample: two heartbeat reads 1.5 s apart must show
++ *       delta == 0 before acting (a healthy task is never touched)
++ *
++ *   Ladder (starts where the LLM asked; escalates on failure):
++ *     L1 resume   SIGUSR1 -> buggy_app re-enables its consumer
++ *     L2 restart  SIGTERM + respawn the SAME workload (saved mode file),
++ *                 so a code bug re-manifests and the ladder keeps walking
++ *   (L3 ELF hotfix is deferred with M4; the rung above L2 is the human.)
++ *
++ *   Post-check: two samples 1.5 s apart, delta > 0 => recovered at that
++ *   rung. Recurrence watch (M3): observe one more heartbeat period and
++ *   sample again - delta == 0 means the fault came back, walk up.
++ *   Delta == 0 right after a rung: walk up immediately.
++ *   Ladder exhausted (L2 failed or recurred): needs_human.
++ *
++ *   Output: ONE line of JSON, <= 256 B (LLM request hygiene), e.g.
++ *     {"level":1,"action":"resume","target":"buggy_app",
++ *      "pre_delta":0,"post_delta":37,"result":"recovered"}
++ *   result: recovered | recurred | refused | needs_confirm | dry_run
++ *         | needs_human
++ *   actions.log (append-only audit): timestamp,target,action,pre,post,result
++ *
++ * TOOL_SEC_SENSITIVE: this tool terminates/replaces real tasks. The LLM
++ * never sees internals; strict input validation happens before anything
++ * touches a process.
++ ****************************************************************************/
++
++#include <signal.h>
++#include <spawn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#include <unistd.h>
++
++#include "agent_compat.h"
++#include "agent_config.h"
++#include "cJSON.h"
++#include "tools/tool_recover.h"
++
++static const char *TAG = "recover";
++
++#define EVID_DIR        AGENT_DATA_DIR "/evidence"
++#define HEARTBEAT_FILE  EVID_DIR "/heartbeat.txt"
++#define PID_FILE        EVID_DIR "/buggy_app.pid"
++#define MODE_FILE       EVID_DIR "/buggy_app.mode"
++#define ACTIONS_LOG     EVID_DIR "/actions.log"
++#define NEEDS_HUMAN     EVID_DIR "/needs_human"
++
++#define RUN_ELF_PATH    "/data/ai_agent/bin/buggy_app"
++
++#ifndef COOLDOWN_S
++#define COOLDOWN_S      120   /* one heartbeat period */
++#endif
++#define HOURLY_MAX      6
++/* M3 recurrence watch: observe one heartbeat period after a recovery
++ * before calling it final; a fault that comes back within it escalates.
++ * Overridable at compile time for host tests. */
++#ifndef RECUR_OBSERVE_S
++#define RECUR_OBSERVE_S COOLDOWN_S
++#endif
++
++/* 0=off 1=dry-run 2=confirm 3=auto; Kconfig SILOOP_RECOVERY_MODE */
++#ifndef CONFIG_SILOOP_RECOVERY_MODE
++#define CONFIG_SILOOP_RECOVERY_MODE 3
++#endif
++
++static time_t s_last_action;
++static time_t s_hour_start;
++static int s_hour_count;
++/* recovery in progress: the agent loop is single-threaded so calls are
++ * serial in practice, but the parallel tool path can run two recover
++ * requests from one LLM message - the second must wait its turn, not
++ * act. */
++static volatile int s_recovering;
++
++/* Demo unlock (nsh: recover_task reset): clear the needs_human latch
++ * and the cooldown/rate state without rebooting the board. */
++void tool_recover_reset(void)
++{
++    unlink(NEEDS_HUMAN);
++    s_last_action = 0;
++    s_hour_start = 0;
++    s_hour_count = 0;
++    s_recovering = 0;
++}
++
++/* ── heartbeat sampling ─────────────────────────────────────────── */
++
++static int read_heartbeat(long *val)
++{
++    /* the writer truncates the file on every publish; retry past the
++     * empty window so a healthy task is never misread as missing */
++    for (int i = 0; i < 3; i++) {
++        FILE *f = fopen(HEARTBEAT_FILE, "r");
++        if (f) {
++            int ok = (fscanf(f, "%ld", val) == 1) ? OK : ERROR;
++            fclose(f);
++            if (ok == OK) {
++                return OK;
++            }
++        }
++        usleep(100000);
++    }
++    return ERROR;
++}
++
++/* Independent re-sample: delta == 0 means the monitored task stalls. */
++static int measure_delta(long *delta)
++{
++    long v1, v2;
++    if (read_heartbeat(&v1) != OK) {
++        return ERROR;
++    }
++    usleep(1500000);
++    if (read_heartbeat(&v2) != OK) {
++        return ERROR;
++    }
++    *delta = v2 - v1;
++    return OK;
++}
++
++/* ── task control ───────────────────────────────────────────────── */
++
++static int read_pid(pid_t *pid)
++{
++    FILE *f = fopen(PID_FILE, "r");
++    if (!f) {
++        return ERROR;
++    }
++    int ok = (fscanf(f, "%d", pid) == 1) ? OK : ERROR;
++    fclose(f);
++    return ok;
++}
++
++static void read_mode(char *buf, size_t size)
++{
++    FILE *f = fopen(MODE_FILE, "r");
++    snprintf(buf, size, "normal");
++    if (f) {
++        if (!fgets(buf, (int)size, f)) {
++            snprintf(buf, size, "normal");
++        }
++        fclose(f);
++    }
++    size_t n = strlen(buf);
++    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'
++        || buf[n - 1] == ' ')) {
++        buf[--n] = '\0';
++    }
++}
++
++static int respawn(const char *path, const char *mode)
++{
++    pid_t child;
++    char *argv[3];
++    argv[0] = (char *)"buggy_app";
++    if (mode && strcmp(mode, "normal") != 0) {
++        argv[1] = (char *)mode;
++        argv[2] = NULL;
++    } else {
++        argv[1] = NULL;
++    }
++    return posix_spawn(&child, path, NULL, NULL, argv, NULL);
++}
++
++/* SiliconLoop: a stale PID file whose number was reused must never make
++ * us signal a foreign task. Verify the pid still runs a buggy_app-family
++ * process before any kill/SIGUSR1 (M2 review item, 2026-11-03). */
++static int verify_pid_target(pid_t pid)
++{
++    char path[64];
++    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
++    FILE *f = fopen(path, "r");
++    if (!f) {
++        return ERROR;
++    }
++    char line[128];
++    int ok = ERROR;
++    while (fgets(line, sizeof(line), f)) {
++        if (strncmp(line, "Name:", 5) == 0) {
++            char name[32];
++            if (sscanf(line + 5, " %31s", name) == 1
++                && strncmp(name, "buggy_app", 9) == 0) {
++                ok = OK;
++            }
++            break;
++        }
++    }
++    fclose(f);
++    return ok;
++}
++
++static int stop_task(void)
++{
++    pid_t pid;
++    if (read_pid(&pid) == OK) {
++        kill(pid, SIGTERM);
++        for (int i = 0; i < 20; i++) {
++            if (kill(pid, 0) != 0) {
++                break;
++            }
++            usleep(100000);
++        }
++    }
++    return OK;
++}
++
++/* ── audit + verdict ────────────────────────────────────────────── */
++
++static void audit(const char *target, const char *action,
++    long pre, long post, const char *result)
++{
++    FILE *f = fopen(ACTIONS_LOG, "a");
++    if (f) {
++        fprintf(f, "%ld,%s,%s,pre=%ld,post=%ld,%s\n",
++            (long)time(NULL), target, action, pre, post, result);
++        fclose(f);
++    }
++}
++
++static void flag_needs_human(void)
++{
++    FILE *f = fopen(NEEDS_HUMAN, "w");
++    if (f) {
++        fprintf(f, "l3 failed\n");
++        fclose(f);
++    }
++}
++
++/* ── one rung ───────────────────────────────────────────────────── */
++
++/* Returns OK when the rung executed (post_delta set), ERROR when it
++ * could not run at all (e.g. no pid file for L1). */
++static int rung(int level, const char *target, long *post_delta)
++{
++    char mode[32];
++    read_mode(mode, sizeof(mode));
++
++    switch (level) {
++    case 0: { /* L1 resume */
++        pid_t pid;
++        if (read_pid(&pid) != OK) {
++            return ERROR;
++        }
++        if (kill(pid, SIGUSR1) != 0) {
++            return ERROR;
++        }
++        usleep(3000000);
++        return measure_delta(post_delta);
++    }
++    case 1: /* L2 restart, same workload */
++        stop_task();
++        if (respawn(RUN_ELF_PATH, mode) != 0) {
++            return ERROR;
++        }
++        usleep(6000000);
++        return measure_delta(post_delta);
++    default: /* L3 hotfix deferred with M4; anything above L2 is human */
++        return ERROR;
++    }
++}
++
++/* ── tool entry ─────────────────────────────────────────────────── */
++
++int tool_recover_execute(const char *input_json, char *output,
++    size_t output_size)
++{
++    cJSON *root = cJSON_Parse(input_json);
++    if (!root) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"bad_json\"}");
++        return ERROR;
++    }
++
++    const char *action = cJSON_GetStringValue(
++        cJSON_GetObjectItem(root, "action"));
++    const char *target = cJSON_GetStringValue(
++        cJSON_GetObjectItem(root, "target"));
++    bool confirm = cJSON_IsTrue(cJSON_GetObjectItem(root, "confirm"));
++
++    if (s_recovering) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"busy\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* reset/test are human-only CLI verbs (nsh/vela CLI). They must
++     * never be reachable through an LLM tool call - refuse explicitly. */
++    if (action && (strcmp(action, "reset") == 0
++        || strcmp(action, "test") == 0)) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"cli_only\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    int level = -1;
++    if (action && strcmp(action, "resume") == 0) level = 0;
++    else if (action && strcmp(action, "restart") == 0) level = 1;
++    if (action && strcmp(action, "hotfix") == 0) {
++        /* M4 (ELF hotfix) is deferred; the rung above L2 is the human */
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"m4_deferred\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: whitelist — nsh/ai_agent/network tasks are untouchable */
++    if (level < 0 || !target
++        || (strcmp(target, "buggy_app") != 0
++            && strcmp(target, "buggy_app_fixed") != 0)) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"whitelist\"}");
++        audit(target ? target : "?", action ? action : "?",
++            -1, -1, "refused_whitelist");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: needs_human blocks everything until manually cleared */
++    if (access(NEEDS_HUMAN, F_OK) == 0) {
++        snprintf(output, output_size,
++            "{\"result\":\"needs_human\",\"reason\":\"l3_failed\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: mode */
++    int mode = CONFIG_SILOOP_RECOVERY_MODE;
++    if (mode == 0) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"disabled\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: cooldown + hourly cap */
++    time_t now = time(NULL);
++    if (s_last_action && now - s_last_action < COOLDOWN_S) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"cooldown\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++    if (s_hour_start == 0 || now - s_hour_start >= 3600) {
++        s_hour_start = now;
++        s_hour_count = 0;
++    }
++    if (s_hour_count >= HOURLY_MAX) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"rate_limit\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: independent re-sample — never touch a healthy task */
++    long pre_delta = -1;
++    if (measure_delta(&pre_delta) != OK) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"no_heartbeat\"}");
++        cJSON_Delete(root);
++        return OK;
++    }
++    if (pre_delta > 0) {
++        snprintf(output, output_size,
++            "{\"result\":\"refused\",\"reason\":\"already_healthy\"}");
++        audit(target, action, pre_delta, pre_delta, "refused_healthy");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* guard: PID identity - a stale PID file whose number was reused
++     * must never make us signal a foreign task */
++    {
++        pid_t cur_pid;
++        if (read_pid(&cur_pid) == OK
++            && verify_pid_target(cur_pid) != OK) {
++            snprintf(output, output_size,
++                "{\"result\":\"refused\",\"reason\":\"pid_mismatch\"}");
++            audit(target, action, pre_delta, -1, "pid_mismatch");
++            cJSON_Delete(root);
++            return OK;
++        }
++    }
++
++    /* confirm mode: first call only returns the plan */
++    if (mode == 2 && !confirm) {
++        snprintf(output, output_size,
++            "{\"result\":\"needs_confirm\",\"action\":\"%s\","
++            "\"target\":\"%s\",\"pre_delta\":%ld}",
++            action, target, pre_delta);
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* dry-run: report the plan, execute nothing */
++    if (mode == 1) {
++        snprintf(output, output_size,
++            "{\"result\":\"dry_run\",\"action\":\"%s\",\"target\":\"%s\","
++            "\"pre_delta\":%ld}",
++            action, target, pre_delta);
++        audit(target, action, pre_delta, -1, "dry_run");
++        cJSON_Delete(root);
++        return OK;
++    }
++
++    /* ── walk the ladder from the level the LLM proposed ─────────── */
++    s_recovering = 1;
++    static const char *const level_name[2] = { "resume", "restart" };
++    long post_delta = 0;
++    int done_level = -1;
++    int recurred = 0;
++
++    for (int lv = level; lv < 2; lv++) {
++        if (rung(lv, target, &post_delta) != OK) {
++            /* rung could not run: try the next level */
++            post_delta = -1;
++            continue;
++        }
++        if (post_delta <= 0) {
++            continue; /* did not recover here: walk up */
++        }
++        /* M3 recurrence watch: hold one heartbeat period, then sample
++         * again. A fault that comes back inside the window is not
++         * recovered - walk up (or escalate when the ladder is done).
++         * Blocks the agent loop for RECUR_OBSERVE_S by design: the
++         * verdict must not be called before the watch completes. */
++        sleep(RECUR_OBSERVE_S);
++        long recur_delta = 0;
++        if (measure_delta(&recur_delta) == OK && recur_delta > 0) {
++            done_level = lv;
++            break;
++        }
++        recurred = 1;
++        post_delta = recur_delta;
++    }
++
++    if (done_level < 0) {
++        flag_needs_human();
++        const char *why = recurred ? "recurred" : "needs_human";
++        snprintf(output, output_size,
++            "{\"level\":2,\"action\":\"restart\",\"target\":\"%s\","
++            "\"pre_delta\":%ld,\"post_delta\":%ld,\"result\":\"%s\"}",
++            target, pre_delta, post_delta, why);
++        audit(target, action, pre_delta, post_delta, why);
++    } else {
++        s_last_action = time(NULL);
++        s_hour_count++;
++        snprintf(output, output_size,
++            "{\"level\":%d,\"action\":\"%s\",\"target\":\"%s\","
++            "\"pre_delta\":%ld,\"post_delta\":%ld,\"result\":\"recovered\"}",
++            done_level + 1, level_name[done_level], target,
++            pre_delta, post_delta);
++        audit(target, level_name[done_level], pre_delta, post_delta,
++            "recovered");
++    }
++
++    s_recovering = 0;
++    cJSON_Delete(root);
++    return OK;
++}
+--- /dev/null
++++ b/src/tools/tool_recover.h
+@@ -0,0 +1,21 @@
++/* SiliconLoop M2: recover_task tool entry (TOOL_SEC_SENSITIVE).
++ * See tool_recover.c for the guard model; the tool is the only channel
++ * through which any recovery action may execute (red line 7). */
++#pragma once
++
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int tool_recover_execute(const char *input_json, char *output,
++    size_t output_size);
++
++/* Demo unlock (nsh: "recover_task reset"): clear the needs_human latch
++ * and cooldown state without rebooting. */
++void tool_recover_reset(void);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/a/src/tools/tool_registry.c b/a/src/tools/tool_registry.c
+--- a/src/tools/tool_registry.c
++++ b/src/tools/tool_registry.c
+@@ -32,6 +32,7 @@
+ #include "tools/tool_feishu_doc.h"
+ #include "tools/tool_fetch_url.h"
+ #include "tools/tool_files.h"
++#include "tools/tool_recover.h"
+ #include "tools/tool_get_time.h"
+ #include "tools/tool_health.h"
+ #include "tools/tool_media.h"
+@@ -105,6 +106,7 @@
+     "read_file", "write_file", "edit_file", "list_dir",
+     "cron_add", "cron_list", "cron_remove",
+     "get_current_time", "fetch_url", "web_search",
++    "recover_task",
+     NULL
+ };
+ 
+@@ -411,6 +413,27 @@
+             TOOL_SCHEMA_END(),
+         tool_vibrate_execute);
+ 
++    /* SiliconLoop M2 execution plane: the only recovery entry
++     * (TOOL_SEC_SENSITIVE). Guards live inside the tool — LLM proposes,
++     * C code decides. */
++    REGISTER_TOOL_FLAGS(
++        "recover_task",
++        "Recover a stalled/buggy task. Call ONLY when the heartbeat "
++        "delta shows a stall. action: resume (L1 soft wake) or restart "
++        "(L2 task restart); on failure the ladder escalates to the "
++        "human automatically. target must be buggy_app. Optional "
++        "confirm:true to execute in confirm mode. Returns one-line "
++        "JSON verdict: recovered | recurred | needs_human | refused.",
++        TOOL_SCHEMA_BEGIN()
++            TOOL_PARAM_ENUM("action",
++                "Recovery level to start from",
++                "\"resume\",\"restart\"") "," TOOL_PARAM_STR(
++                "target", "Task to recover (whitelist: buggy_app)")
++                "," TOOL_PARAM_BOOL("confirm",
++                "Required true in confirm mode to execute")
++                TOOL_SCHEMA_END_REQUIRED("\"action\",\"target\""),
++        tool_recover_execute, TOOL_SEC_SENSITIVE);
++
+     /* Feishu document tools */
+     REGISTER_TOOL(
+         "feishu_doc_create",
+diff --git a/a/src/tools/tool_registry.h b/a/src/tools/tool_registry.h
+--- a/src/tools/tool_registry.h
++++ b/src/tools/tool_registry.h
+@@ -29,11 +29,17 @@
+ extern "C" {
+ #endif
+ 
++/* Tool security level: TOOL_SEC_SENSITIVE marks execution-plane tools
++ * that act on real tasks/files. Their execute() must validate strictly
++ * (recover_task keeps whitelist + cooldown + re-sample guards in C). */
++#define TOOL_SEC_SENSITIVE 0x01u
++
+ typedef struct {
+     const char* name;
+     const char* description;
+     const char* input_schema_json;
+     int (*execute)(const char* input_json, char* output, size_t output_size);
++    unsigned flags;
+ } agent_tool_t;
+ 
+ /* ── Schema builder macros (compile-time JSON Schema generation) ─── */
+@@ -76,6 +82,18 @@
+ #define REGISTER_TOOL_NO_PARAMS(tname, desc, fn) \
+     REGISTER_TOOL(tname, desc, TOOL_NO_PARAMS, fn)
+ 
++#define REGISTER_TOOL_FLAGS(tname, desc, schema, fn, tool_flags) \
++    do {                                                        \
++        agent_tool_t _tool_##fn = {                             \
++            .name = tname,                                      \
++            .description = desc,                                \
++            .input_schema_json = schema,                        \
++            .execute = fn,                                      \
++            .flags = tool_flags,                                \
++        };                                                      \
++        register_tool(&_tool_##fn);                             \
++    } while (0)
++
+ /* ── External tool provider callback (breaks circular dependency) ──── */
+ 
+ /**
+diff --git a/a/src/channels/nsh_commands.c b/a/src/channels/nsh_commands.c
+--- a/src/channels/nsh_commands.c
++++ b/src/channels/nsh_commands.c
+@@ -40,6 +40,7 @@
+ #include "tools/tool_get_time.h"
+ #include "tools/tool_proxyquickapp.h"
+ #include "tools/tool_registry.h"
++#include "tools/tool_recover.h"
+ #include "tools/tool_web_search.h"
+ #include "agent_compat.h"
+ #include "agent_config.h"
+@@ -915,6 +916,39 @@
+ 
+         if (strcmp(cmd, "help") == 0)
+             cmd_help();
++        else if (strcmp(cmd, "recover_task") == 0) {
++            /* SiliconLoop: demo unlock - clear the needs_human latch
++             * without a reboot (usage: recover_task reset) */
++            if (argc >= 2 && strcmp(argv[1], "reset") == 0) {
++                tool_recover_reset();
++                printf("recover_task: latch cleared, cooldown reset\n");
++            } else if (argc >= 3 && strcmp(argv[1], "test") == 0) {
++                /* M2 board acceptance driver: call the real tool
++                 * tool_registry_execute path `count` times, paced to
++                 * stay under the 10/min tool-guard rate limit. Healthy
++                 * state: every call must come back refused. */
++                int count = atoi(argv[2]);
++                char in[96];
++                char out[320];
++                snprintf(in, sizeof(in),
++                    "{\"action\":\"resume\",\"target\":\"buggy_app\"}");
++                int refused = 0;
++                for (int i = 0; i < count; i++) {
++                    out[0] = '\0';
++                    tool_registry_execute("recover_task", in, out,
++                        sizeof(out));
++                    printf("[%02d] %s\n", i, out);
++                    if (strstr(out, "refused") || strstr(out, "blocked")) {
++                        refused++;
++                    }
++                    sleep(7);
++                }
++                printf("recover_task test: %d calls, refused/blocked=%d\n",
++                    count, refused);
++            } else {
++                printf("usage: recover_task reset | recover_task test <n>\n");
++            }
++        }
+         else if (strcmp(cmd, "net_status") == 0)
+             cmd_net_status();
+         else if (strcmp(cmd, "net_test") == 0)
+diff --git a/a/Kconfig b/a/Kconfig
+--- a/Kconfig
++++ b/Kconfig
+@@ -309,4 +309,16 @@
+ 		server for remote configuration, skill management, and
+ 		log retrieval from Android companion App.
+ 
++
++config SILOOP_RECOVERY_MODE
++    int "SiliconLoop recovery execution mode (recover_task)"
++    default 3
++    range 0 3
++    ---help---
++        0 = off: recover_task refuses everything.
++        1 = dry-run: guards + re-sample only, reports the plan.
++        2 = confirm: executes only when the LLM passes confirm:true.
++        3 = auto: executes immediately after the C-side guards pass.
++
+ endif
++
+diff --git a/a/src/tools/skill_loader.c b/a/src/tools/skill_loader.c
+--- a/src/tools/skill_loader.c
++++ b/src/tools/skill_loader.c
+@@ -112,7 +112,8 @@
+ 
+ #define BUILTIN_SELF_DIAGNOSTIC \
+     "# Embedded Self-Diagnostic\n\n" \
+-    "Structured hardware-level diagnosis for openvela devices.\n\n" \
++    "Structured hardware-level diagnosis and recovery for openvela " \
++    "devices.\n\n" \
+     "## When to use\n" \
+     "When the user asks to diagnose the device, check system health, " \
+     "reports a hang, or suspects a stuck task.\n\n" \
+@@ -133,8 +134,13 @@
+     "Task and thread counts in ps are NOT evidence of a fault on " \
+     "their own. A process with worker threads shows several entries " \
+     "with the same name; that is normal.\n\n" \
++    "## How to recover\n" \
++    "When the judgement is stall, propose recover_task exactly once " \
++    "with action \"resume\" and target \"buggy_app\". The tool decides " \
++    "everything else (guards, escalation, verification) and returns " \
++    "one line of JSON. Never call it on a healthy system.\n\n" \
+     "## Output format\n" \
+-    "Answer in exactly these four sections. Never omit one.\n" \
++    "Answer in exactly these six sections. Never omit one.\n" \
+     "Maximum 3 sentences per section. Be concise.\n\n" \
+     "**Observed Evidence**\n" \
+     "Both heartbeat values and what the commands printed. No " \
+@@ -144,12 +150,20 @@
+     "inference.\n\n" \
+     "**Confidence**\n" \
+     "High, medium or low, with the reason for that rating.\n\n" \
++    "**Recovery Action**\n" \
++    "Whether recover_task was called, with which action and target, " \
++    "and the tool verdict (recovered / recurred / needs_human / " \
++    "refused). None if the system was healthy.\n\n" \
++    "**Verification**\n" \
++    "The post-action delta and the recurrence watch result. On a " \
++    "healthy run: delta from step 1 and 4.\n\n" \
+     "**Proposed Test or Fix**\n" \
+     "A concrete next step. Not a vague suggestion.\n\n" \
+     "## Rules\n" \
+     "- Never invent command output. Report failures as failures.\n" \
+     "- Call exactly one tool per step. Never batch tool calls.\n" \
+-    "- When confidence is low, propose an experiment, not a fix.\n"
++    "- When confidence is low, propose an experiment, not a fix.\n" \
++    "- Only propose recover_task on a stall verdict, never on healthy.\n"
+ 
+ #define BUILTIN_SYSTEM_HEALTH \
+     "# System Health Check\n\n" \

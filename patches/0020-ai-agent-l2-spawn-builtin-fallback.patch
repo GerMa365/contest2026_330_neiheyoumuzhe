@@ -1,0 +1,44 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0020] ai-agent: L2 respawn falls back to the builtin name
+
+Incremental on 0017/0019 (tool_recover.c is new in 0017). L2 restart
+spawned RUN_ELF_PATH (/data/ai_agent/bin/buggy_app), but buggy_app is a
+NuttX builtin and nothing re-deploys an ELF there at boot (/data is
+tmpfs and wipes on every reboot), so posix_spawn always failed and the
+restart rung could never fire. Try the deployed path first, then fall
+back to the builtin registration name so the same workload restarts
+either way.
+
+Verified 2026-11-04: scenario C rounds (bug mode: L1 ineffective ->
+L2 restart -> fault re-manifests -> needs_human) see the respawned
+task in ps and the ladder walks both rungs (see
+docs/evidence/2026-11-04/).
+--- a/src/tools/tool_recover.c
++++ b/src/tools/tool_recover.c
+@@ -171,6 +171,8 @@
+ {
+     pid_t child;
+     char *argv[3];
++    int rc;
++
+     argv[0] = (char *)"buggy_app";
+     if (mode && strcmp(mode, "normal") != 0) {
+         argv[1] = (char *)mode;
+@@ -178,7 +180,16 @@
+     } else {
+         argv[1] = NULL;
+     }
+-    return posix_spawn(&child, path, NULL, NULL, argv, NULL);
++    rc = posix_spawn(&child, path, NULL, NULL, argv, NULL);
++    if (rc != 0) {
++        /* SiliconLoop: RUN_ELF_PATH lives on /data (tmpfs, wiped on
++         * reboot) and nothing re-deploys it at boot, so the deployed
++         * ELF is often missing. Fall back to the builtin registration
++         * name so L2 restarts the same workload either way
++         * (M3 scenario C, 2026-11-04). */
++        rc = posix_spawn(&child, argv[0], NULL, NULL, argv, NULL);
++    }
++    return rc;
+ }
+ 
+ /* SiliconLoop: a stale PID file whose number was reused must never make
