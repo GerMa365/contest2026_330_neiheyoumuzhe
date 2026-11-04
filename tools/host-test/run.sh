@@ -44,4 +44,13 @@ gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined \
     "$CJSON_DIR/cJSON.c" -lpthread -lm -o "$OUT/recover_guard_test"
 ASAN_OPTIONS=detect_leaks=1 "$OUT/recover_guard_test"
 
+# fallback report on LLM failure (2026-11-04): real tool_recover.c again
+gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined \
+    -DCONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR='"/tmp/host-test-data"' \
+    -DCOOLDOWN_S=1 -DRECUR_OBSERVE_S=2 \
+    -I"$HERE/stubs" -I"$AI/src" -I"$CJSON_INC" \
+    "$HERE/fallback_report_test.c" "$AI/src/tools/tool_recover.c" \
+    "$CJSON_DIR/cJSON.c" -lpthread -lm -o "$OUT/fallback_report_test"
+ASAN_OPTIONS=detect_leaks=1 "$OUT/fallback_report_test"
+
 echo "HOST-TEST SUITE: ALL GREEN"

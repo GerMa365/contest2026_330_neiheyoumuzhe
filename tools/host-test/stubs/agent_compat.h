@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h> /* LOG_INFO / LOG_ERR, like the real agent_compat.h */
 #include <unistd.h>
 #ifndef OK
 #define OK 0
