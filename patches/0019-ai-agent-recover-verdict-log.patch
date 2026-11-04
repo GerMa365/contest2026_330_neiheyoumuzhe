@@ -1,0 +1,39 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0019] ai-agent: print the recover_task verdict into the serial log
+
+Incremental on 0017 (tool_recover.c is new there). The serial log records
+tool results as byte counts only ("Tool recover_task result: 101 bytes"),
+so recovery rounds left no verdict evidence on the wire - the only sinks
+were the LLM conversation and actions.log on tmpfs, both unreachable
+after the round. The verdict is a designed public one-liner (<=256 B):
+log it in full via syslog.
+
+Verified 2026-11-04: B rounds now carry "[recover] verdict {...}"
+lines that scenario.py counts (see docs/evidence/2026-11-04/).
+--- a/src/tools/tool_recover.c
++++ b/src/tools/tool_recover.c
+@@ -280,9 +280,24 @@
+ 
+ /* ── tool entry ─────────────────────────────────────────────────── */
+ 
++static int tool_recover_execute_inner(const char *input_json, char *output,
++    size_t output_size);
++
+ int tool_recover_execute(const char *input_json, char *output,
+     size_t output_size)
+ {
++    /* SiliconLoop: the serial log records tool results as byte counts
++     * only, but this verdict is the acceptance evidence for recovery
++     * rounds and is a designed public one-liner (<=256 B). Print it in
++     * full so every round's serial log carries it. */
++    int rc = tool_recover_execute_inner(input_json, output, output_size);
++    syslog(LOG_INFO, "[%s] verdict %s\n", TAG, output);
++    return rc;
++}
++
++static int tool_recover_execute_inner(const char *input_json, char *output,
++    size_t output_size)
++{
+     cJSON *root = cJSON_Parse(input_json);
+     if (!root) {
+         snprintf(output, output_size,

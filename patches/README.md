@@ -516,3 +516,429 @@ IRAM/DRAM 的划分保留，固件代码段仍为不可写。
 pthread、task，含模块内再次 exec。每个测试结束后内存收支归零。
 
 日志见 `docs/evidence/2026-09-18/elf-loading-7tests-pass.log`。
+
+---
+
+# 0015-ai-agent-request-size-guard.patch
+
+## 性质：资源约束加固，长期需要
+
+影响所有把工具输出原样放进 LLM 请求的部署；设备堆越小越需要。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+- 基线：`dev` 分支 + 0007–0012 之后的 `src/core/agent_loop.c`、
+  `src/tools/skill_loader.c`、`src/core/context_builder.c`
+
+## 解决的问题
+
+诊断七步中每一步的工具结果（role:"tool" 消息）原样进入后续所有迭代的
+请求体。2026-11-02 实测：mimo-v2.6（响应带 reasoning_content，上下文
+增长更快）下单轮请求体从 7.5KB 涨到 10.4KB；模拟"双 agent 并发"的
+脚本缺陷数据中，第 7 步序列化时精确复现
+
+    [llm] OOM: failed to serialize request body
+
+即 9 月 162 轮回归中 8 次失败的同款 OOM。
+
+## 根因
+
+请求体 = 系统提示(3.0KB) + 工具清单(3.4KB) + 会话历史(最多 4 条，
+含整份报告文本) + 本轮累积的全部工具输出。堆剩余 30-46KB 时，
+cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
+
+## 解法
+
+1. `cap_tool_content()`：每条 role:"tool" 内容超过 1536B 截断并标记
+   `[...truncated by SiliconLoop memory guard]`。单工具实测最大
+   1626B（skill 文件），ps=481B、free=179B——模型推理只需结果头部。
+2. heartbeat 频道的会话历史深度 4→2：诊断是固定七步脚本，旧轮次只
+   增加字节不增加信号（人类对话保持 4）。
+3. B3 — 心跳每轮都用 read_file 读 1626B 的 self-diagnostic.md，
+   文件 + JSON 转义每轮消耗约 2KB。技能是固件常量，故把五步内联进
+   skills 摘要（"(steps inline — do NOT read the skill file)"，同时
+   压掉原"(read with: read_file ...)"提示，否则模型照提示照样去读），
+   摘要 911B→约 1.2KB；`context_builder.c` 的 skills_buf 1024→1536
+   防截尾。内联文本含四段报告格式名，报告结构不依赖读文件。
+4. B4 — 内联提示不可靠（m1-regression.r1 实测模型两轮心跳都照读
+   skill 文件），改在 `tool_files.c` read_file 工具层确定性拦截：
+   路径命中 AGENT_SKILLS_DIR 时返回摘要桩（说明 + 文件头 256B），
+   全文只在主机侧保留。请求体不再受模型行为影响。
+5. B5 — `reasoning_content`（模型思考）在 `add_assistant_message`
+   回显进后续每轮请求，m1-b-validate 实测单步 +2.4KB，是 12.5KB
+   峰值的主力之一。截断到 256B + 标记；保留字段本体防 Kimi 系 API
+   对缺失字段返回 400。
+6. 附带修复：snprintf 返回值未钳制可能使 `off` 越过 `size`
+   （摘要放在 1KB 栈缓冲上，属潜在栈越界写）。
+
+## 与 0009 的分层说明（skill_loader.c / tool_files.c）
+
+0015 中 skill_loader.c 的改动（B3：诊断步骤内联进 skills 摘要 + 报告
+四段格式名 + snprintf 越界钳制）和 tool_files.c 的改动（B4：技能文件
+读取返回摘要桩）都以 **0009 应用后的 skill_loader.c/tool_files.c 为基线**
+（0009 做了 AGENT_DATA_DIR 宏化改造，本补丁不改 0009 本身）。
+0009 先应用、0015 后应用，顺序不可交换。
+
+## 局限
+
+- 截断可能削掉长输出的尾部信息；当前诊断技能用到的输出全部 <1.6KB，
+  实际影响为零。若未来工具需要回传大结果，应改为"摘要由工具自己生成"。
+- static capped 缓冲区不可重入——add_tool_result_messages 的并行路径
+  在 join 之后串行调用它，安全；若改为流水线需加锁。
+- **B5 reasoning 回显截断到 256B，可能影响诊断质量**：模型的思考上下文
+  被截后，跨步骤的推理链变短。当前场景 A 未见影响（判定只依赖心跳增量），
+  但 M3 场景 B（stall 判定）可能需要完整推理，届时实测验证；若质量不足，
+  提高 REASONING_ECHO_MAX 或改为"只保留末轮思考"。
+- **B4 把技能文件读取改为返回摘要桩**（纯提示 ~150B，不再回传文件内容）：
+  模型不再能通过 read_file 获取技能全文。技能步骤已内联在系统提示里，
+  诊断流程不受影响；但"让用户查看/编辑技能文件"类交互会被桩截断，
+  技能编写场景需在主机侧操作（桩注释里已说明）。
+
+## 验证记录
+
+- 干净副本（dev + 0007–0012）`patch --dry-run -p1` 通过（B1+B2 与 B3
+  分两次生成，均对同一基线验证）。
+- B1 生效确认：板上日志 `[agent] Tool result capped: 1626 -> 1579 bytes`
+  （m1-b-validate.r1）。
+- 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
+
+
+# 0016-ai-agent-request-tree-guard.patch
+
+## 性质：资源约束加固与发送前校验，长期需要
+
+0015 的续篇（顺序 0015 → 0016）。请求组装路径的分配失败仪表、
+发送前请求树校验，顺带把静态序列化缓冲从 20KB 缩到 16KB。
+
+## 目标仓库
+
+`packages/ai_agent/`（agent_loop.c、llm_proxy.c、llm_parse.c）
+
+- 基线：0015 应用之后的树
+
+## 解决的问题
+
+- MiMo 校验器开始拒绝缺 `name` 字段的 tool 消息（"`name` is not
+  set"，m1-50round-v2.r1），整轮 400。
+- cJSON 吞掉分配失败：malloc 失败时字段静默缺失，堆饥饿时生成
+  "缺字段"的请求树（同一类 400），事后无法归因。
+- 静态序列化缓冲 20KB 大于所需（实测最大请求 12.7KB），白占
+  最大连续空闲块这一瓶颈资源。
+
+## 根因 / 解法
+
+1. tool 消息一律携带 `name`（OpenAI 规范可选、MiMo 必填）；
+   llm_parse.c 跳过无名工具定义并告警，坏定义不再出线。
+2. cJSON 分配钩子计数 malloc 失败（llm_alloc_fail_count()），
+   请求日志带 `alloc_fail=N +M`，失败可归因。
+3. 发送前 validate_request_tree()：工具须有 function.name、
+   messages 非空且每条有 role；不完整则记
+   "request tree incomplete (alloc_fail=…)" 并拒绝发送——
+   回归脚本按 tree_incomplete 计数，任何一次出现都是停机判据。
+4. s_req_buf 20480 → 16384（16KB，实测峰值 12.7KB）。
+5. 不再 cJSON_Duplicate 消息树（深拷贝瞬时堆 ≈ 树本身大小）：
+   就地挂接调用方数组、用完摘下归还；tools 数组按 tools_json
+   键缓存复用（schema 树约 10KB）。
+6. API 非 200 时把请求体转存 evidence/last_request.json 供事后
+   定位（须在静态缓冲所有权结束前转存）。
+
+## 局限
+
+- 分配钩子是全局 cJSON 钩子，计数器无锁：单 agent loop 串行下
+  安全，若改并行请求路径需加锁。
+- tools 缓存以 tools_json 字符串为键，工具集变化时整树重建；
+  静态缓冲与缓存均不可重入。
+- last_request.json 只在失败时写、每次覆盖，不是历史档案。
+
+## 验证记录
+
+- 干净副本（0015 应用后）`patch --dry-run -p1` 通过。
+- M1 50 轮验收（docs/evidence/2026-11-03/m1-acceptance.md，含附1
+  的 16KB 核实与时代表）：OOM=0，请求峰值 12.7KB < 16KB。
+- "request tree incomplete" 在 M1 50 轮与 11-04 夜间 20 轮
+  （m3-overnight-01.md）均为 0 次。
+
+
+# 0017-ai-agent-recover-task.patch
+
+## 性质：闭环执行面（M2+M3），合并 m2-wip 时落地
+
+0016 的续篇（顺序 0015 → 0016 → 0017）。recover_task 是处置动作的
+唯一入口（红线 7）；"LLM 提议，确定性代码裁决"。
+
+## 目标仓库
+
+`packages/ai_agent/`（tool_recover.c/h 新增，tool_registry.c/h、Kconfig、
+skill_loader.c 增改）
+
+- 基线：0016 应用之后的树
+
+## 解决的问题
+
+场景 B/C 的处置执行面：stall 判定后需要确定性恢复（L1 软恢复 →
+L2 重启）与升级给人的出口；诊断报告需要记录处置与复核（六段式）。
+
+## 根因 / 设计
+
+- 守卫（全在 C 代码）：needs_human 锁存 → 目标白名单（仅 buggy_app）→
+  冷却 120s + 每小时 6 次上限 → Kconfig 模式（off/dry-run/confirm/auto）
+  → 独立重新采样确认 Δ=0（健康任务永不触碰）。
+- 阶梯：L1 SIGUSR1 唤醒消费者 → L2 SIGTERM+原样重启（代码缺陷会复现，
+  阶梯继续走）→ **L3 热修复随 M4 调整为"升级给人"**。
+- 处置后复核：两次采样 Δ>0 = 恢复；**复现检测（M3）**：恢复后再观察
+  一个心跳周期，Δ=0 视为复发，升一级或升级给人。
+- 返回一行 JSON ≤256B（recovered/recurred/needs_human/refused/
+  needs_confirm/dry_run）；actions.log 只追加审计。
+
+## 局限
+
+- L2/L3 各阻塞 agent loop 数秒（等待+复核+观察窗口），演示可接受；
+  并行诊断受影响时改异步处置（M5 前议）。
+- 复现观察窗口 120s（一个心跳周期）在工具内 sleep，主机测试用
+  -DRECUR_OBSERVE_S 缩短。
+- hotfix 入参返回 m4_deferred，M4 恢复后启用。
+- **PID 复用防护**：发出 SIGUSR1/SIGTERM 前核对 /proc/<pid>/status 的
+  Name 确为 buggy_app 家族；PID 文件过期且号码被复用时拒绝执行并记
+  actions.log（pid_mismatch）。
+- **防并发**：处置进行中（s_recovering）的再次调用返回 refused:busy；
+  串行 agent loop 下心跳诊断自然排队等待处置结束。
+- **阻塞时长**：一次调用最长约 4.3 分钟（L1 复发 + L2 复发 + 两次
+  120s 复现观察）；典型恢复路径约 2 分钟。工具执行发生在 LLM 调用
+  之间，不触发 LLM 超时（AGENT_LLM_TIMEOUT_SEC=180 只约束 llm 调用）。
+- **解锁**：`recover_task reset`（nsh/vela CLI）清 needs_human 锁存与
+  冷却状态，无需复位，供答辩现场连续演示。
+- **reset/test 仅限人工 CLI**：两者只存在于 vela> CLI 的命令循环
+  （非 NSH 内建命令，run_shell 触达不到）；工具入参 action 传
+  reset/test 一律拒绝（cli_only），host-test G 场景覆盖。
+
+## 验证记录
+
+- 干净副本（0015+0016 应用后）patch --dry-run 通过。
+- 主机测试 tools/host-test/recover_guard_test.c（ASan/UBSan 零报告）：
+  健康态 20 次调用全部被守卫拒绝；stall 态 L1 恢复 + 复现观察通过；
+  L1 无效 → L2 失败 → needs_human；恢复后观察窗内复发 → recurred。
+
+# 0018-ai-agent-skill-v2-recover-step.patch
+
+## 性质：闭环诊断 Skill 修正（M3），合并 m2-wip 后的增量补丁
+
+0017 的续篇（顺序 0015 → 0016 → 0017 → 0018），只改 skill_loader.c
+（该文件已在 0017 中改过，按规范新增增量补丁，不改旧补丁）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0017 应用后的 skill_loader.c（与 0017 同一上游基线，增量导出）。
+
+## 解决的问题
+
+场景 B（stall 注入）里模型正确判定 stall 却从不调用 recover_task：
+11-04 夜间 3 轮完成诊断的 B 轮全部如此，恢复 0/3。
+
+## 根因
+
+Skill 的步骤清单停在"5. write_file 报告"，recover_task 只出现在
+"How to recover"段落里、没有对应步骤；而报告写入在 agent_loop 里
+是**终结性本地捷径**（is_terminal_write，写完直接结束本轮、不再进
+LLM）——模型按步骤走到第 5 步写完报告，循环就结束了，永远没有机会
+在之后调工具。内联摘要（B3）还把六段式报告压成了四段。
+
+## 解法
+
+- 步骤 5 改为条件处置：判定 stall 才调 recover_task（action=resume、
+  target=buggy_app），记录一行 JSON 结果；健康或心跳文件缺失则跳过。
+  报告写作移到步骤 6，**动作发生在终结性写入之前**。
+- 内联摘要同步新步骤，并补全六段式报告的段名（Recovery Action /
+  Verification 之前被漏掉）。
+- skills/siliconloop-self-diagnostic.md 同提交同步（双份一致规则）。
+
+## 局限
+
+- 内联摘要增长约 230B 至约 1.47KB，skills_buf 1536B 内但偏紧；超长时
+  既有钳制保证不越界。若后续再加内容需同步扩 buffer。
+- 模型遵循度仍是概率性的（LLM 提议面）；裁决面（守卫/阶梯/复核）在
+  C 代码里不受影响。
+- 报告文本在串口日志里截断到约 512B（日志框架限制），scenario.py 的
+  判定已改为基于工具执行行与工具返回行（短行不截断）。
+
+## 验证记录
+
+- 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
+- 板上验证见 docs/evidence/2026-11-04/：B 轮模型按新步骤调用
+  recover_task 并拿到 {"result":"recovered"}（L1 + 复现观察）。
+
+# 0019-ai-agent-recover-verdict-log.patch
+
+## 性质：证据链补齐（M3），增量补丁
+
+0017 的续篇（应用顺序 0015 → 0016 → 0017 → 0018 → 0019），只改
+tool_recover.c（0017 新增该文件，0018 未触碰）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0017 应用后的 tool_recover.c。
+
+## 解决的问题
+
+工具结果在串口日志里只记字节数（"Tool recover_task result: 101
+bytes"）：恢复轮的判定 JSON 只存在于 LLM 会话与 /data 的
+actions.log（tmpfs，掉电即失），轮次证据链断裂，scenario.py 无法
+从日志判定 recovered。
+
+## 根因
+
+agent 只把工具结果回传给 LLM，日志框架打印的是长度不是内容。
+判定行本身是设计好的公开输出（一行 JSON ≤256B、无敏感信息），
+应当随日志留档。
+
+## 解法
+
+tool_recover_execute 拆出 _inner 保持原逻辑不动，外层包装在返回前
+syslog 一行 `[recover] verdict {...}`。串口日志从此永久携带每轮
+判定（recovered / recurred / needs_human / refused / dry_run /
+needs_confirm），scenario.py 的 `"result":"recovered"` 计数有据可依。
+
+## 局限
+
+- 解析按子串匹配判定行；若日志分级过滤变化需保证 LOG_INFO 可见。
+- actions.log 仍是权威审计，本补丁只是把同一行镜像到串口日志。
+
+## 验证记录
+
+- 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
+- 板上验证：B 场景重跑各轮日志含 verdict 行，见
+  docs/evidence/2026-11-04/m3-acceptance.md。
+
+# 0020-ai-agent-l2-spawn-builtin-fallback.patch
+
+## 性质：缺陷修复（M3 场景 C 暴露），增量补丁
+
+0017 的续篇（应用顺序 0015 → 0016 → 0017 → 0018 → 0019 → 0020），只改
+tool_recover.c（0017 新增该文件，0018 未触碰）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0019 应用后的 tool_recover.c。
+
+## 解决的问题
+
+L2 重启阶梯的 posix_spawn 永远失败：目标路径
+`/data/ai_agent/bin/buggy_app` 从未存在。buggy_app 是 NuttX 内建应用
+（builtin），没有 ELF 部署到 /data；/data 是 tmpfs 每次上电清空，
+即便部署过也活不过复位。于是"重启任务"这一级永远走不到，
+bug 模式无法演示 L1 无效 → L2 重启 → 复现 → 升级给人。
+
+## 根因
+
+L2 按 m2-wip-design 的部署步骤设计（`apps/bin/buggy_app` → 板上
+`/data/ai_agent/bin/`，L2 重启用），但该部署步骤从未纳入自动化
+流程；设计文档也没有覆盖"部署缺失时怎么办"。
+
+## 解法
+
+respawn() 先按原设计 posix_spawn 部署路径；失败则回退用内建注册名
+"buggy_app" 再试一次。两条路都经 posix_spawn，argv 保留 mode 参数，
+重启后的进程复现同一 workload。
+
+## 局限
+
+- 内建名回退依赖 builtin binfmt 按名查找（上游 NuttX 支持；若
+  openvela 有差异会在板测暴露）。
+- 持久化的修复版 ELF 部署仍属 M4（/data tmpfs 问题见
+  docs/m4-design.md），本补丁只保证 L2 在无部署时也能重启。
+
+## 验证记录
+
+- 干净副本全链 0007 → … → 0020 `git apply` 通过（2026-11-04）。
+- 板上验证：场景 C（bug 模式）重跑，数据见
+  docs/evidence/2026-11-04/m3-acceptance.md 的场景 C 一节。
+
+# 0021-ai-agent-fallback-report.patch
+
+## 性质：能力补充（M3 保底报告），增量补丁
+
+0019 的续篇（应用顺序 0015 → 0016 → 0017 → 0018 → 0019 → 0020 → 0021），
+改 tool_recover.c/.h（0017 新增、0019/0020 续改）、agent_loop.c 与
+tool_files.c 各一处挂钩。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0020 应用后的树（0007 → … → 0020 全链 `git apply` 干净副本）。
+
+## 解决的问题
+
+处置（recover_task 阶梯）已经执行、但随后"写报告的 LLM 调用"失败时，
+report.md 完全缺失。尾部 LLM 失败在低堆时稳定复现（场景 C 每轮必现、
+场景 B 约 1/10），报告是六段式交付物，缺报告等于该轮证据链断裂。
+
+## 根因
+
+报告内容只由 LLM 生成；request body 序列化在低空闲块下分配失败后，
+写报告这一步没有任何确定性兜底。判定行（0019）当时已经携带了报告
+所需的全部字段，却没有被利用。
+
+## 解法
+
+判定返回前把报告预渲染进 1024 字节静态缓冲（零堆分配）并置位；仅当
+"本会话阶梯执行过 ∧ 本会话 report.md 尚未由 write_file 写成功 ∧ 会话
+以 LLM 终态失败结束"时才 open/write/close 落盘，一次恢复最多写一份。
+write_file 成功写 report.md、或新会话开始都会撤防。内容 = 判定字段
+（level/action/pre_delta/post_delta/result）+ 目标名 + 时间 + 一行规则
+结论（L1 后恢复 = 临时停顿；L2 后恢复 = 任务已替换；阶梯走完 = 疑似
+代码缺陷需查源码）+ 标记 "LLM unavailable: fallback report"。
+
+## 局限
+
+- 报告模板是英文固定文案，不含采样明细（设计简化：不做采样捕获）。
+- 仅覆盖"recover_task 已执行"这一路径；LLM 一开始就失败时无报告
+  （该路径本就没有处置发生，符合"只在处置后兜底"的设计）。
+- 静态缓冲 1024 字节；字段超长会被 snprintf 截断（判定行 ≤256B 的
+  约束保证了正常使用不会触顶）。
+
+## 验证记录
+
+- host-test：tools/host-test/fallback_report_test.c 六用例（C 型写出、
+  B 型结论、健康不写、正常报告优先、会话边界撤防、一次性 + 重新武装），
+  ASan/UBSan 零报告（2026-11-04）。
+- 干净副本全链 0007 → … → 0021 `patch --dry-run -p1` 通过（2026-11-04）。
+- 板上：场景 C 三轮保底报告 3/3 写出，见 docs/evidence/2026-11-04/
+  m3-fallback/ 与 m3-acceptance.md。
+
+# 闭环验证数据汇总（2026-11-04）
+
+0015–0021 构成决赛闭环（请求体守卫 → 树校验 → recover_task 处置
+工具 → Skill 处置步骤 → 判定行日志 → L2 重启回退 → 保底报告）。板上回归数据
+（原件 docs/evidence/2026-11-04/）：
+
+| 场景 | 轮数 | 判据 | 结果 | 主要验证的补丁 |
+| --- | --- | --- | --- | --- |
+| A 健康 | 10 | 误处置 = 0 | 0/10 ✅ | 0017 守卫（独立复采样拒绝） |
+| B 卡死 | 10（夜间）+ 10（重跑） | 恢复率 ≥90% | 重跑 10/10、9/9 = 100% ✅ | 0018（处置步骤前置）、0019（判定行） |
+| C 代码缺陷 | 5 | 阶梯走完并升级 needs_human | 见 m3-acceptance.md 场景 C 一节 | 0017 阶梯、0020（L2 重启回退） |
+
+底线（Ghee 口径）：
+
+- 序列化 OOM：**0**（35 轮合计，0015/0016 的目的）
+- 发送前校验器拦截（request tree incomplete）：**0**（0016 的目的）
+- 最大空闲块：诊断期间 10.0–15.6KB，低于 M0/M1 基线但底线口径
+  （OOM/拦截）持续为零，未进一步劣化。
+
+→ 提交版本默认闭环模式保持 auto（README 第五节写明降级条件与
+切换方法）。

@@ -1,0 +1,366 @@
+From: SiliconLoop closed-loop development
+Subject: [PATCH 0015] ai-agent: cap LLM request growth (memory guard)
+
+diff --git a/src/core/agent_loop.c b/src/core/agent_loop.c
+--- a/src/core/agent_loop.c
++++ b/src/core/agent_loop.c
+@@ -121,6 +121,77 @@
+ static agent_mem_pool_t s_tool_pool;
+ static bool s_pool_ready = false;
+ 
++/* TESTABLE: mem-guard begin */
++#define TOOL_MSG_MAX (1536)
++#define REASONING_ECHO_MAX (256)
++
++/* SiliconLoop: cut s at a UTF-8 character boundary. Byte-precision
++ * truncation (snprintf "%.<n>s") lands mid-character on CJK text and a
++ * partial sequence inside a JSON string makes the API reject the whole
++ * request ("Invalid JSON in request body", m1-b6c-validate.r2 — the
++ * thinking echo is Chinese and was being cut at byte 256). */
++static void utf8_cut(char* s, size_t max)
++{
++    if (strlen(s) <= max) {
++        return;
++    }
++    s[max] = '\0';
++    size_t i = max;
++    /* back over continuation bytes to the lead of the char at the cut */
++    while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) {
++        i--;
++    }
++    if (i > 0) {
++        unsigned char lead = (unsigned char)s[i - 1];
++        size_t need = 1;
++        if ((lead & 0xE0) == 0xC0) need = 2;
++        else if ((lead & 0xF0) == 0xE0) need = 3;
++        else if ((lead & 0xF8) == 0xF0) need = 4;
++        if (i - 1 + need > max) {
++            i--; /* multibyte char split by the cut: drop the partial one */
++        }
++    }
++    s[i] = '\0';
++}
++
++static const char* cap_tool_content(const char* content)
++{
++    /* +64, not +32: the truncation marker is 44 B and the old buffer
++     * overflowed 12 B past the static (m1-b6-validate.r2 showed a
++     * corrupted tool message reaching the API). */
++    static char capped[TOOL_MSG_MAX + 64];
++    size_t len = strlen(content);
++    if (len <= TOOL_MSG_MAX) {
++        return content;
++    }
++    /* snprintf with explicit bound + UTF-8-safe cut + marker appended
++     * with the remaining size — no strcat anywhere. */
++    snprintf(capped, TOOL_MSG_MAX + 1, "%s", content);
++    utf8_cut(capped, TOOL_MSG_MAX);
++    size_t used = strlen(capped);
++    snprintf(capped + used, sizeof(capped) - used,
++        "\n[...truncated by SiliconLoop memory guard]");
++    syslog(LOG_INFO, "[agent] Tool result capped: %d -> %d bytes\n",
++        (int)len, (int)strlen(capped));
++    return capped;
++}
++
++static const char* cap_reasoning_content(const char* content)
++{
++    static char reasoning_capped[REASONING_ECHO_MAX + 64];
++    size_t len = strlen(content);
++    if (len <= REASONING_ECHO_MAX) {
++        return content;
++    }
++    snprintf(reasoning_capped, REASONING_ECHO_MAX + 1, "%s", content);
++    utf8_cut(reasoning_capped, REASONING_ECHO_MAX);
++    size_t used = strlen(reasoning_capped);
++    snprintf(reasoning_capped + used, sizeof(reasoning_capped) - used,
++        "\n[...thinking truncated by SiliconLoop memory guard]");
++    return reasoning_capped;
++}
++/* TESTABLE: mem-guard end */
++
+ /* Build OpenAI-format assistant message with tool_calls at the top level */
+ static void add_assistant_message(cJSON* messages, const llm_response_t* resp)
+ {
+@@ -133,10 +204,15 @@
+         cJSON_AddNullToObject(asst_msg, "content");
+     }
+ 
+-    /* Kimi thinking mode: echo back reasoning_content or the API returns 400 */
++    /* Kimi thinking mode: echo back reasoning_content or the API returns 400.
++     * SiliconLoop: the thinking text can exceed 2 KB per step and it is
++     * re-echoed in every later request of the round (m1-b-validate.r1 saw
++     * +2.4 KB in one step); that hidden growth pushed step-7 request
++     * bodies into the serialization-OOM zone. Keep the field but cap its
++     * length — the API contract needs the key present, not verbatim. */
+     if (resp->reasoning_content && resp->reasoning_content[0]) {
+         cJSON_AddStringToObject(asst_msg, "reasoning_content",
+-            resp->reasoning_content);
++            cap_reasoning_content(resp->reasoning_content));
+     }
+ 
+     if (resp->call_count > 0) {
+@@ -212,6 +288,12 @@
+     return NULL;
+ }
+ 
++/* SiliconLoop: cap tool-result content stored in the LLM request.
++ * Full outputs (ps, read_file of skills) can be several KB each; over 7
++ * iterations they dominate the request body and caused step-7 serialization
++ * OOM (see docs/closed-loop-plan.md). The model only needs the head of each
++ * result to reason, so keep the first TOOL_MSG_MAX bytes and mark the cut. */
++
+ /* Add one role:"tool" message per tool result (OpenAI format).
+  * When call_count > 1, all tools run in parallel threads.
+  * Uses memory pool for parallel buffers, with heap fallback. */
+@@ -240,7 +322,8 @@
+         cJSON* result_msg = cJSON_CreateObject();
+         cJSON_AddStringToObject(result_msg, "role", "tool");
+         cJSON_AddStringToObject(result_msg, "tool_call_id", call->id);
+-        cJSON_AddStringToObject(result_msg, "content", tool_output);
++        cJSON_AddStringToObject(result_msg, "content",
++            cap_tool_content(tool_output));
+         cJSON_AddItemToArray(messages, result_msg);
+         return;
+     }
+@@ -320,7 +403,7 @@
+                 resp->calls[i].id);
+             cJSON_AddStringToObject(result_msg, "content",
+                 (tasks[i].output && tasks[i].output[0])
+-                    ? tasks[i].output
++                    ? cap_tool_content(tasks[i].output)
+                     : "{}");
+             cJSON_AddItemToArray(messages, result_msg);
+         }
+@@ -1445,8 +1528,15 @@
+ static cJSON* build_messages(const char* chat_id, const char* content,
+     char* history_json, size_t hist_size)
+ {
++    /* SiliconLoop: cron/system channels (heartbeat diagnosis) run a fixed
++     * 7-step script each time; older turns add request bytes but no signal.
++     * Keep 2 history entries there, 4 for human chats. */
++    int max_hist = AGENT_AI_AGENT_MAX_HISTORY;
++    if (strncmp(chat_id, "heartbeat", 9) == 0) {
++        max_hist = 2;
++    }
+     session_get_history_json(chat_id, history_json, hist_size,
+-        AGENT_AI_AGENT_MAX_HISTORY);
++        max_hist);
+ 
+     cJSON* messages = cJSON_Parse(history_json);
+ 
+diff --git a/src/tools/skill_loader.c b/src/tools/skill_loader.c
+--- a/src/tools/skill_loader.c
++++ b/src/tools/skill_loader.c
+@@ -410,10 +410,48 @@
+         extract_description(f, desc, sizeof(desc));
+         fclose(f);
+ 
+-        /* Append to summary */
+-        off += snprintf(buf + off, size - off,
+-            "- **%s**: %s (read with: read_file %s)\n",
+-            title, desc, full_path);
++        /* SiliconLoop: the heartbeat diagnostic runs every 2 minutes; having
++         * the LLM read_file the full skill each round cost ~2 KB of request
++         * body (file + JSON escaping) and pushed step-7 requests toward the
++         * 12.5 KB serialization-OOM zone. The skill is firmware-constant, so
++         * inline its steps in the summary and drop the per-round read. The
++         * "(read with: ...)" hint is suppressed for it, or the model would
++         * follow the hint and read the file anyway. */
++        /* SiliconLoop: clamp the running offset to what actually fits.
++         * snprintf returns the *would-be* length; without this, one long
++         * line can push `off` past `size` and the final buf[off] write
++         * out of bounds (the summary sits in a 1 KB stack buffer in the
++         * system-prompt path). */
++        int line_len;
++        if (strcmp(name, "self-diagnostic.md") == 0) {
++            line_len = snprintf(buf + off, size - off,
++                "- **%s**: %s (steps inline — do NOT read the skill file)\n"
++                "  1) read_file %s/evidence/heartbeat.txt; "
++                "2) run_shell \"ps\"; 3) run_shell \"free\"; "
++                "4) read_file heartbeat.txt again; "
++                "5) write_file the report to "
++                "%s/evidence/report.md with sections "
++                "**Observed Evidence**, **Hypothesis**, **Confidence**, "
++                "**Proposed Test or Fix**. Judge by heartbeat delta: "
++                "increased=healthy, identical=stall.\n",
++                title, desc, AGENT_DATA_DIR, AGENT_DATA_DIR);
++        } else {
++            line_len = snprintf(buf + off, size - off,
++                "- **%s**: %s (read with: read_file %s)\n",
++                title, desc, full_path);
++        }
++        /* SiliconLoop: snprintf returns the *would-be* length, so a long
++         * line can push `off` past `size`; the trailing buf[off] write
++         * would then go out of bounds (summary lives in a 1 KB stack
++         * buffer in the system-prompt path). Clamp instead. */
++        if (line_len < 0) {
++            break;
++        }
++        if ((size_t)line_len >= size - off) {
++            off = size - 1;
++            break;
++        }
++        off += (size_t)line_len;
+     }
+ 
+     closedir(dir);
+diff --git a/src/core/context_builder.c b/src/core/context_builder.c
+--- a/src/core/context_builder.c
++++ b/src/core/context_builder.c
+@@ -168,8 +168,10 @@
+         }
+     }
+ 
+-    /* Skills summary — use smaller stack buffer */
+-    char skills_buf[1024];
++    /* Skills summary — SiliconLoop: self-diagnostic steps are now inlined
++     * here (B3), so the summary grew from 911 to ~1250 bytes; 1024 would
++     * truncate the tail skills. 1536 keeps all 11 skills with headroom. */
++    char skills_buf[1536];
+     size_t skills_len = skill_loader_build_summary(skills_buf, sizeof(skills_buf));
+     if (skills_len > 0) {
+         off += snprintf(buf + off, size - off,
+diff --git a/src/tools/tool_files.c b/src/tools/tool_files.c
+--- a/src/tools/tool_files.c
++++ b/src/tools/tool_files.c
+@@ -146,6 +146,28 @@
+         return ERROR;
+     }
+ 
++    /* SiliconLoop: the LLM re-reads skill files on every heartbeat round
++     * even when their steps are inlined in the system prompt; the ~1.6 KB
++     * body then rides in every later request of the round and was a direct
++     * contributor to step-7 serialization OOM (docs/closed-loop-plan.md
++     * §4). Prompt hints ("do NOT read the skill file") proved unreliable:
++     * m1-regression.r1 shows the model reading it anyway in both heartbeat
++     * rounds of one boot. Deterministic guard in the tool layer — skill
++     * file reads return a short note instead of content (m1-50round.r7
++     * proved even a 433 B stub left the request too big once reasoning
++     * and tool chatter accumulated). Full text stays reachable on the
++     * host for skill authoring. */
++    if (strncmp(path, AGENT_SKILLS_DIR, strlen(AGENT_SKILLS_DIR)) == 0) {
++        snprintf(output, output_size,
++            "Skill file %s is elided by SiliconLoop memory guard; its "
++            "steps and report format are already inlined in your system "
++            "prompt. Follow them there.", path);
++        syslog(LOG_INFO, "[%s] read_file: skill stub %d bytes for %s\n",
++            TAG, (int)strlen(output), path);
++        cJSON_Delete(root);
++        return OK;
++    }
++
+     FILE *f = fopen(path, "r");
+     if (!f) {
+         snprintf(output, output_size, "Error: file not found: %s", path);
+diff --git a/src/llm/llm_proxy.c b/src/llm/llm_proxy.c
+--- a/src/llm/llm_proxy.c
++++ b/src/llm/llm_proxy.c
+@@ -53,6 +53,44 @@
+ 
+ static pthread_mutex_t s_llm_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
++/* SiliconLoop: request bodies reach ~12 KB at step 7 of the heartbeat
++ * diagnostic. cJSON_PrintUnformatted grows its output buffer by doubling,
++ * so the transient contiguous need is up to ~2x the body — on a heap
++ * fragmented by the tool pool + TLS buffers that alloc failed exactly at
++ * step 7 ("OOM: failed to serialize request body", the 9-16 regression's
++ * failure mode and m1-50round.r4/r7). Serialize into this static buffer
++ * instead: zero heap churn, sized past the worst request seen (12.7 KB)
++ * with margin. The lock serializes the whole serialize-send-release
++ * window; llm calls funnel through the single agent loop task so it is
++ * uncontended in practice. Every req_serialize() pairs with exactly one
++ * req_release(). */
++/* TESTABLE: req-buf begin */
++static char s_req_buf[20480];
++static pthread_mutex_t s_req_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static char* req_serialize(cJSON* body, bool* is_static)
++{
++    pthread_mutex_lock(&s_req_lock);
++    if (cJSON_PrintPreallocated(body, s_req_buf, (int)sizeof(s_req_buf), 0)) {
++        *is_static = true;
++        return s_req_buf;
++    }
++    syslog(LOG_WARNING,
++        "[%s] request exceeds %d B static buffer, heap fallback\n",
++        TAG, (int)sizeof(s_req_buf));
++    *is_static = false;
++    return cJSON_PrintUnformatted(body);
++}
++
++static void req_release(char* post_data, bool is_static)
++{
++    if (post_data && !is_static) {
++        free(post_data);
++    }
++    pthread_mutex_unlock(&s_req_lock);
++}
++/* TESTABLE: req-buf end */
++
+ /* Check if host uses OpenAI-compatible max_completion_tokens param */
+ bool is_openai_compat_host(const char* host)
+ {
+@@ -609,9 +647,11 @@
+ 
+     cJSON_AddItemToObject(body, "messages", messages);
+ 
+-    char* post_data = cJSON_PrintUnformatted(body);
++    bool post_is_static = false;
++    char* post_data = req_serialize(body, &post_is_static);
+     cJSON_Delete(body);
+     if (!post_data) {
++        req_release(NULL, false);
+         snprintf(response_buf, buf_size, "Error: Failed to build request");
+         return ERROR;
+     }
+@@ -638,7 +678,7 @@
+ 
+         if (err != OK) {
+             resp_buf_free(&rb);
+-            free(post_data);
++            req_release(post_data, post_is_static);
+             snprintf(response_buf, buf_size, "Error: HTTP request failed");
+             return err;
+         }
+@@ -650,7 +690,7 @@
+         memset(&rb, 0, sizeof(rb));
+     }
+ 
+-    free(post_data);
++    req_release(post_data, post_is_static);
+ 
+     if (status != 200) {
+         snprintf(response_buf, buf_size, "API error (HTTP %d): %.200s", status,
+@@ -731,10 +771,12 @@
+         cJSON_AddItemToObject(body, "tools", tools_arr);
+     }
+ 
+-    char* post_data = cJSON_PrintUnformatted(body);
++    bool post_is_static = false;
++    char* post_data = req_serialize(body, &post_is_static);
+ 
+     cJSON_Delete(body);
+     if (!post_data) {
++        req_release(NULL, false);
+         syslog(LOG_ERR,
+             "[%s] OOM: failed to serialize request body\n", TAG);
+         return ERROR;
+@@ -763,7 +805,7 @@
+ 
+         if (err != OK) {
+             resp_buf_free(&rb);
+-            free(post_data);
++            req_release(post_data, post_is_static);
+             return err;
+         }
+ 
+@@ -774,7 +816,7 @@
+         memset(&rb, 0, sizeof(rb));
+     }
+ 
+-    free(post_data);
++    req_release(post_data, post_is_static);
+ 
+     if (status != 200) {
+         syslog(LOG_ERR, "[%s] API error %d: %.500s\n", TAG, status,

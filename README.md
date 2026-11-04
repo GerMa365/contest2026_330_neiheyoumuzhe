@@ -25,6 +25,40 @@ Agent 每 120 秒被心跳服务唤醒一次，执行七步诊断：读任务清
 连续运行 5.5 小时、162 轮无人干预的回归测试：148 轮完整执行七步
 （91%），零缓存空转，8 次失败原因与位置完全一致。
 
+**闭环自愈：发现之后自动处置**
+
+只发现不处置还称不上闭环。处置动作全部收敛到一个工具
+`recover_task`，遵循"LLM 提议，确定性代码裁决"：模型只决定是否
+调用、从哪一级开始；守卫（目标白名单、冷却限速、执行前独立复采
+样）、恢复阶梯、执行后复核全部在 C 代码里完成——大模型的不确定性
+不传导进处置的执行面。
+
+恢复阶梯对同一目标逐级升级：
+
+| 级 | 动作 | 说明 |
+|---|---|---|
+| L1 | SIGUSR1 唤醒停摆的消费者 | 软恢复，卡死场景一次到位 |
+| L2 | SIGTERM + 按原模式重启同一任务 | L1 无效时的硬恢复 |
+| L3 | 加载修复版 ELF 替换故障任务 | 设计见 [docs/m4-design.md](docs/m4-design.md) |
+| 升级 | 阶梯用尽 → needs_human | 人工解锁前不再自动处置 |
+
+执行前后各独立采样一次心跳计数：Δ=0 才允许执行（防误处置），
+处置后 Δ>0 才算恢复，恢复后再观察一个心跳周期确认未复发。每次
+处置产出一行 JSON 判定（≤256B）打进串口日志，并追加 actions.log
+审计行；诊断报告仍由 Agent 自己写（六段式）。
+
+三个场景的板上回归（A×10+B×10 夜间 + B×10 重跑 + C×5，共 35 轮，
+详见 [docs/evidence/2026-11-04/m3-acceptance.md](docs/evidence/2026-11-04/m3-acceptance.md)）：
+
+| 场景 | 含义 | 判据 | 结果 |
+|---|---|---|---|
+| A | 健康 | 误处置 = 0 | **0/10** ✅ |
+| B | 卡死（L1 可恢复） | 恢复率 ≥ 90% | **10/10（双口径 100%）** ✅ |
+| C | 代码缺陷（L1 无效 → L2 重启 → 复现 → 升级给人） | 阶梯走完并升级 | 见 m3-acceptance.md 场景 C 一节 |
+
+底线口径（序列化 OOM、发送前校验器拦截）在全部回归轮次中均为 0，
+因此提交版本默认闭环模式保持 auto（切换方法见第五节）。
+
 **二、补上 ESP32-P4 的 ELF 动态加载**
 
 该平台此前无法执行编译期之外的程序。定位出两层根因——PMP 将堆区
@@ -66,7 +100,7 @@ contest2026_330_neiheyoumuzhe/
 │   ├── configs/siliconloop/     完整构建配置
 │   ├── src/  include/  scripts/ 板级支持
 │   └── Kconfig
-├── patches/                     13 个补丁，根因与验证见 patches/README.md
+├── patches/                     16 个补丁，根因与验证见 patches/README.md
 ├── skills/
 │   └── siliconloop-self-diagnostic.md
 │                                自诊断 Skill 的可读版本；实际编进固件的
@@ -78,13 +112,14 @@ contest2026_330_neiheyoumuzhe/
 │   ├── product-introduction.md  作品介绍（PDF 版一并提交）
 │   ├── technical-deep-dive.md   两个技术成果的定位过程
 │   ├── video-script.md          演示视频脚本
+│   ├── 视频.7z                  演示视频（2026-11-04 真机串口录屏，内含 11月4日.mp4）
 │   └── evidence/                板上实测原始日志与统计，见其 README
 └── logs/                        AI Coding 日志（仅收尾阶段，见第七节）
 ```
 
 ## 四、补丁清单
 
-13 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
+19 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
 
 | 补丁 | 目标仓库 | 内容 |
 |---|---|---|
@@ -101,6 +136,13 @@ contest2026_330_neiheyoumuzhe/
 | 0012 | `packages/ai_agent` | heartbeat / cron 路径修复 |
 | 0013 | esp-hal-3rdparty | PMP 允许从堆执行 |
 | 0014 | `nuttx` | 重定位后同步指令缓存 |
+| 0015 | `packages/ai_agent` | 请求体尺寸守卫（工具输出/思考截断、技能内联） |
+| 0016 | `packages/ai_agent` | 请求树校验、分配失败计数、16KB 静态缓冲 |
+| 0017 | `packages/ai_agent` | recover_task 处置工具（守卫 + 阶梯 + 复核） |
+| 0018 | `packages/ai_agent` | 诊断 Skill v2：处置步骤先于报告写入 |
+| 0019 | `packages/ai_agent` | recover_task 判定行输出到串口日志 |
+| 0020 | `packages/ai_agent` | L2 重启回退内建名（ELF 未部署时仍可重启） |
+| 0021 | `packages/ai_agent` | 保底报告（收尾 LLM 失败时由 C 代码写 report.md） |
 
 每个补丁的现象、根因、解法、局限与验证记录见
 [patches/README.md](patches/README.md)。
@@ -145,7 +187,7 @@ git apply ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-e
 
 # packages/ai_agent
 cd <openvela>/packages/ai_agent
-for p in 0007 0008 0009 0010 0011 0012; do
+for p in 0007 0008 0009 0010 0011 0012 0015 0016 0017 0018 0019 0020 0021; do
   git apply ../../contest2026_330_neiheyoumuzhe/patches/$p-*.patch
 done
 ```
@@ -158,6 +200,11 @@ done
 cd <openvela>
 ./build.sh vendor/openvela/boards/contest2026_330_board/configs/siliconloop -j8
 ```
+
+> **注意（构建环境）**：编译最后一步（MKIMAGE 生成 `nuttx.bin` 镜像）
+> 需要 `esptool.py` 在 PATH 里。用虚拟环境时先 `export PATH=~/esp-venv/bin:$PATH`
+> 再编译，否则报 "esptool.py not found"、镜像生成失败（此时目标文件
+> 已链接成功，补上 PATH 重跑 `make` 即可，不用全量重编）。
 
 manifest 已把 `board/contest_board` 软链到
 `vendor/openvela/boards/contest2026_330_board`，因此 config 路径用软链
@@ -255,6 +302,44 @@ nsh> buggy_app md <addr> # 读取指定内存
 ```
 
 这两个子命令是定位 ELF 加载问题时写的，保留备用。
+
+**5. 闭环模式与恢复控制**
+
+处置动作只能经 `recover_task` 工具执行（守卫、恢复阶梯、复核全在
+C 代码，见 [patches/README.md](patches/README.md) 的 0017 一节）。
+运行模式由 Kconfig 开关 `SILOOP_RECOVERY_MODE` 控制：
+
+| 值 | 模式 | 行为 |
+|---|---|---|
+| 0 | off | 一切处置拒绝 |
+| 1 | dry-run | 只走守卫与独立复采样，报告处置计划，不执行 |
+| 2 | confirm | 首次调用只返回计划，确认后才执行 |
+| 3 | auto（默认） | 守卫通过即执行 |
+
+**默认保持 auto**：提交版本默认值 3，前提是序列化 OOM 与发送前校验
+拦截（日志中的 `request tree incomplete`）在回归中持续为 0；出现任何
+一次即降级为 dry-run 重新评估。
+
+切换模式（改后重新编译烧录）：
+
+```bash
+# 方式一：menuconfig（Application configuration → SiliconLoop recovery mode）
+cd <openvela>/nuttx && make menuconfig && make -j8
+
+# 方式二：改 configs/siliconloop/defconfig 后重新构建
+#   CONFIG_SILOOP_RECOVERY_MODE=1
+./build.sh vendor/openvela/boards/contest2026_330_board/configs/siliconloop -j8
+```
+
+恢复阶梯用尽后目标被标记"需人工介入"（needs_human），人工解锁前不再
+自动处置。解锁命令在 vela> CLI（NSH 的 run_shell 触达不到，仅供人工
+操作）：
+
+```
+vela> recover_task reset
+```
+
+清除 needs_human 锁存与冷却/限速状态，便于现场连续演示。
 
 ## 六、向上游的贡献
 
