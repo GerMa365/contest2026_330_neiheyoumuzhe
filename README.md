@@ -84,7 +84,7 @@ contest2026_330_neiheyoumuzhe/
 
 ## 四、补丁清单
 
-13 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
+18 个补丁分布在 5 个仓库。**没有 0006，编号跳过。**
 
 | 补丁 | 目标仓库 | 内容 |
 |---|---|---|
@@ -101,6 +101,11 @@ contest2026_330_neiheyoumuzhe/
 | 0012 | `packages/ai_agent` | heartbeat / cron 路径修复 |
 | 0013 | esp-hal-3rdparty | PMP 允许从堆执行 |
 | 0014 | `nuttx` | 重定位后同步指令缓存 |
+| 0015 | `packages/ai_agent` | 请求体尺寸守卫（工具输出/思考截断、技能内联） |
+| 0016 | `packages/ai_agent` | 请求树校验、分配失败计数、16KB 静态缓冲 |
+| 0017 | `packages/ai_agent` | recover_task 处置工具（守卫 + 阶梯 + 复核） |
+| 0018 | `packages/ai_agent` | 诊断 Skill v2：处置步骤先于报告写入 |
+| 0019 | `packages/ai_agent` | recover_task 判定行输出到串口日志 |
 
 每个补丁的现象、根因、解法、局限与验证记录见
 [patches/README.md](patches/README.md)。
@@ -145,7 +150,7 @@ git apply ../../contest2026_330_neiheyoumuzhe/patches/0004-vendor-board-common-e
 
 # packages/ai_agent
 cd <openvela>/packages/ai_agent
-for p in 0007 0008 0009 0010 0011 0012; do
+for p in 0007 0008 0009 0010 0011 0012 0015 0016 0017 0018 0019; do
   git apply ../../contest2026_330_neiheyoumuzhe/patches/$p-*.patch
 done
 ```

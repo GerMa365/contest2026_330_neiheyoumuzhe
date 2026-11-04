@@ -605,6 +605,62 @@ cJSON 序列化峰值叠加 TLS 缓冲，安全余量不足一倍。
 - 请求体峰值与 OOM 计数：待 50 轮回归确认（进行中，见日报）。
 
 
+# 0016-ai-agent-request-tree-guard.patch
+
+## 性质：资源约束加固与发送前校验，长期需要
+
+0015 的续篇（顺序 0015 → 0016）。请求组装路径的分配失败仪表、
+发送前请求树校验，顺带把静态序列化缓冲从 20KB 缩到 16KB。
+
+## 目标仓库
+
+`packages/ai_agent/`（agent_loop.c、llm_proxy.c、llm_parse.c）
+
+- 基线：0015 应用之后的树
+
+## 解决的问题
+
+- MiMo 校验器开始拒绝缺 `name` 字段的 tool 消息（"`name` is not
+  set"，m1-50round-v2.r1），整轮 400。
+- cJSON 吞掉分配失败：malloc 失败时字段静默缺失，堆饥饿时生成
+  "缺字段"的请求树（同一类 400），事后无法归因。
+- 静态序列化缓冲 20KB 大于所需（实测最大请求 12.7KB），白占
+  最大连续空闲块这一瓶颈资源。
+
+## 根因 / 解法
+
+1. tool 消息一律携带 `name`（OpenAI 规范可选、MiMo 必填）；
+   llm_parse.c 跳过无名工具定义并告警，坏定义不再出线。
+2. cJSON 分配钩子计数 malloc 失败（llm_alloc_fail_count()），
+   请求日志带 `alloc_fail=N +M`，失败可归因。
+3. 发送前 validate_request_tree()：工具须有 function.name、
+   messages 非空且每条有 role；不完整则记
+   "request tree incomplete (alloc_fail=…)" 并拒绝发送——
+   回归脚本按 tree_incomplete 计数，任何一次出现都是停机判据。
+4. s_req_buf 20480 → 16384（16KB，实测峰值 12.7KB）。
+5. 不再 cJSON_Duplicate 消息树（深拷贝瞬时堆 ≈ 树本身大小）：
+   就地挂接调用方数组、用完摘下归还；tools 数组按 tools_json
+   键缓存复用（schema 树约 10KB）。
+6. API 非 200 时把请求体转存 evidence/last_request.json 供事后
+   定位（须在静态缓冲所有权结束前转存）。
+
+## 局限
+
+- 分配钩子是全局 cJSON 钩子，计数器无锁：单 agent loop 串行下
+  安全，若改并行请求路径需加锁。
+- tools 缓存以 tools_json 字符串为键，工具集变化时整树重建；
+  静态缓冲与缓存均不可重入。
+- last_request.json 只在失败时写、每次覆盖，不是历史档案。
+
+## 验证记录
+
+- 干净副本（0015 应用后）`patch --dry-run -p1` 通过。
+- M1 50 轮验收（docs/evidence/2026-11-03/m1-acceptance.md，含附1
+  的 16KB 核实与时代表）：OOM=0，请求峰值 12.7KB < 16KB。
+- "request tree incomplete" 在 M1 50 轮与 11-04 夜间 20 轮
+  （m3-overnight-01.md）均为 0 次。
+
+
 # 0017-ai-agent-recover-task.patch
 
 ## 性质：闭环执行面（M2+M3），合并 m2-wip 时落地
@@ -715,3 +771,49 @@ LLM）——模型按步骤走到第 5 步写完报告，循环就结束了，�
 - 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
 - 板上验证见 docs/evidence/2026-11-04/：B 轮模型按新步骤调用
   recover_task 并拿到 {"result":"recovered"}（L1 + 复现观察）。
+
+# 0019-ai-agent-recover-verdict-log.patch
+
+## 性质：证据链补齐（M3），增量补丁
+
+0017 的续篇（应用顺序 0015 → 0016 → 0017 → 0018 → 0019），只改
+tool_recover.c（0017 新增该文件，0018 未触碰）。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0017 应用后的 tool_recover.c。
+
+## 解决的问题
+
+工具结果在串口日志里只记字节数（"Tool recover_task result: 101
+bytes"）：恢复轮的判定 JSON 只存在于 LLM 会话与 /data 的
+actions.log（tmpfs，掉电即失），轮次证据链断裂，scenario.py 无法
+从日志判定 recovered。
+
+## 根因
+
+agent 只把工具结果回传给 LLM，日志框架打印的是长度不是内容。
+判定行本身是设计好的公开输出（一行 JSON ≤256B、无敏感信息），
+应当随日志留档。
+
+## 解法
+
+tool_recover_execute 拆出 _inner 保持原逻辑不动，外层包装在返回前
+syslog 一行 `[recover] verdict {...}`。串口日志从此永久携带每轮
+判定（recovered / recurred / needs_human / refused / dry_run /
+needs_confirm），scenario.py 的 `"result":"recovered"` 计数有据可依。
+
+## 局限
+
+- 解析按子串匹配判定行；若日志分级过滤变化需保证 LOG_INFO 可见。
+- actions.log 仍是权威审计，本补丁只是把同一行镜像到串口日志。
+
+## 验证记录
+
+- 干净副本（0017 应用后）`patch --dry-run -p1` 通过（2026-11-04）。
+- 板上验证：B 场景重跑各轮日志含 verdict 行，见
+  docs/evidence/2026-11-04/m3-acceptance.md。
