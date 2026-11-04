@@ -266,6 +266,44 @@ nsh> buggy_app md <addr> # 读取指定内存
 
 这两个子命令是定位 ELF 加载问题时写的，保留备用。
 
+**5. 闭环模式与恢复控制**
+
+处置动作只能经 `recover_task` 工具执行（守卫、恢复阶梯、复核全在
+C 代码，见 [patches/README.md](patches/README.md) 的 0017 一节）。
+运行模式由 Kconfig 开关 `SILOOP_RECOVERY_MODE` 控制：
+
+| 值 | 模式 | 行为 |
+|---|---|---|
+| 0 | off | 一切处置拒绝 |
+| 1 | dry-run | 只走守卫与独立复采样，报告处置计划，不执行 |
+| 2 | confirm | 首次调用只返回计划，确认后才执行 |
+| 3 | auto（默认） | 守卫通过即执行 |
+
+**默认保持 auto**：提交版本默认值 3，前提是序列化 OOM 与发送前校验
+拦截（日志中的 `request tree incomplete`）在回归中持续为 0；出现任何
+一次即降级为 dry-run 重新评估。
+
+切换模式（改后重新编译烧录）：
+
+```bash
+# 方式一：menuconfig（Application configuration → SiliconLoop recovery mode）
+cd <openvela>/nuttx && make menuconfig && make -j8
+
+# 方式二：改 configs/siliconloop/defconfig 后重新构建
+#   CONFIG_SILOOP_RECOVERY_MODE=1
+./build.sh vendor/openvela/boards/contest2026_330_board/configs/siliconloop -j8
+```
+
+恢复阶梯用尽后目标被标记"需人工介入"（needs_human），人工解锁前不再
+自动处置。解锁命令在 vela> CLI（NSH 的 run_shell 触达不到，仅供人工
+操作）：
+
+```
+vela> recover_task reset
+```
+
+清除 needs_human 锁存与冷却/限速状态，便于现场连续演示。
+
 ## 六、向上游的贡献
 
 | 编号 | 内容 | 对应补丁 |

@@ -68,3 +68,27 @@
   场景 C 只能做到"重启后复现 → 升级给人"（加分项，11-04 上午视时间）。
 - 我建议的下一步：赛后按 SMARTFS 方案（上一条）落地持久化后补 M4。
 - 需要 Ghee 做什么：知悉；如你仍想要 L3 现场演示，尽早说（工作量大）。
+
+## 2026-11-04 10:38 · 已提交 AI 日志含个人邮箱，改写受限于红线 5
+- 现象：提交版本文件的个人身份检查（11-04 指令第 5 点）发现
+  logs/GerMa365/2026-11-01..03 三份 jsonl 含个人 Gmail（git config
+  user.email 与提交 Author 行的工具输出）；另含上游提交元数据
+  tianqin@xiaomi.com（Signed-off-by，公开上游信息，非我方泄露）。
+  "GerMa365" 是 GitHub 登录名（logs/ 目录命名规范要求）；"Ghee" 是
+  CLAUDE.md 模板自带称呼（模板要求 blockers 写"需要 Ghee 做什么"）。
+  其余文件（docs/、README、patches/、tools/）：邮箱/手机号/身份证号
+  零命中。
+- 已尝试 / 已排除的假设：全库扫描已做（见上）；"已证实"类表述检查
+  通过（README/patches/README/blockers 均为三层口径，无越界断言）。
+- 冲突：红线 5 禁止改写 logs/ 下已有文件；但个人邮箱属敏感身份信息
+  （红线 2 对密钥同理：保存前必须删掉）。且该邮箱已随 11-03 推送批次
+  进入 fork 的 git 提交 Author 字段，历史改写需 force-push（红线 6 禁止）。
+- 我建议的下一步（选项与风险）：
+  A. 只管今后：git config user.email 换成
+  GerMa365@users.noreply.github.com（此后新提交不再带个人邮箱；
+  旧历史仍可见）；
+  B. 例外脱敏：允许我改写三份 jsonl 里的邮箱字符串（违反红线 5
+  的字面禁令，需你明确批准；历史 Author 仍在）；
+  C. 维持现状：日志如实保留（AI 日志要求真实，且改动破坏可验证性）。
+- 需要 Ghee 做什么：在 A/B/C 里选一个或组合（建议 A±C）；在你决定
+  前我不改 logs/、不改 git config。
