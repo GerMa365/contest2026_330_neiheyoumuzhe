@@ -1,5 +1,7 @@
 # SiliconLoop
 
+> 本文档描述 9 月初赛提交时的版本（七步诊断、13 个补丁），决赛新增的闭环见 README 第一节和 patches/README.md 的 0015–0021。
+
 **在 ESP32-P4 上让 AI Agent 自主诊断硬件故障**
 
 2026 首届 openvela AI 硬件开发者大赛 · 队伍 330 · 内核游牧者
