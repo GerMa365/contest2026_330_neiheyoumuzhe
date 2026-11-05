@@ -1,5 +1,17 @@
 # M3 夜间回归第一轮（2026-11-04 03:10–06:05）与缺口发现
 
+> **编者说明（2026-11-05 文档收尾时补）**
+>
+> (a) 文中验收标准出自 `closed-loop-plan`，该文件是团队内部计划，
+> 未随仓库提交；验收标准以本文表格为准。
+> (b) 文中出现的提交号均指 GerMa365 fork 的 `feature/closed-loop` 分支。
+> (c) 原始日志位置：本文引用的 m3-overnight 原始日志（A×10、B×10
+> 共 20 份 + verdicts.jsonl + runner.log）连同同目录的 m3-B2×10、
+> m3-B-verify.r1、verdicts-b2.jsonl、runner-b2.log 共 35 个文件，
+> 2026-11-05 已从本地补入本目录 `m3-overnight/`，随仓库提交；本地
+> 原件仍在 `~/claude_work/日志/2026-11-04/m3-overnight/`。本文无仅存
+> 本地的其他原始日志。
+
 命令：`scenario.py --scenario A --rounds 10`（420s 窗口）→
 `--scenario B --rounds 10`（600s 窗口），每轮硬复位。
 原始日志 `~/claude_work/日志/2026-11-04/m3-overnight/`（20 份 + verdicts.jsonl）。

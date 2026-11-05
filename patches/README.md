@@ -1,4 +1,36 @@
-# nuttx 公共仓库补丁
+# 补丁总索引
+
+20 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
+根因、解法、局限与验证记录见下文对应小节。
+
+| 补丁 | 目标仓库 | 内容 |
+|---|---|---|
+| 0001 | `nuttx` | ESP32-P4 芯片支持 |
+| 0002 | esp-hal-3rdparty | 跳过 PSRAM MMU 清空 |
+| 0003 | `apps` | mbedtls 头文件优先级 |
+| 0004 | `vendor/openvela` | 板级公共 Make.defs |
+| 0005 | esp-hal-3rdparty | 以太网链路定时器改用 wdog |
+| 0007 | `packages/ai_agent` | 主循环：单调时钟、缓存策略、本地工具捷径 |
+| 0008 | `packages/ai_agent` | 工具白名单裁剪（36 → 11） |
+| 0009 | `packages/ai_agent` | 数据目录宏统一 |
+| 0010 | `packages/ai_agent` | 嵌入式内存与超时调优 |
+| 0011 | `packages/ai_agent` | TLS 超时、连接池保质期、时钟校正 |
+| 0012 | `packages/ai_agent` | heartbeat / cron 路径修复 |
+| 0013 | esp-hal-3rdparty | PMP 允许从堆执行 |
+| 0014 | `nuttx` | 重定位后同步指令缓存 |
+| 0015 | `packages/ai_agent` | 请求体尺寸守卫（工具输出/思考截断、技能内联） |
+| 0016 | `packages/ai_agent` | 请求树校验、分配失败计数、16KB 静态缓冲 |
+| 0017 | `packages/ai_agent` | recover_task 处置工具（守卫 + 阶梯 + 复核） |
+| 0018 | `packages/ai_agent` | 诊断 Skill v2：处置步骤先于报告写入 |
+| 0019 | `packages/ai_agent` | recover_task 判定行输出到串口日志 |
+| 0020 | `packages/ai_agent` | L2 重启回退内建名（ELF 未部署时仍可重启） |
+| 0021 | `packages/ai_agent` | 保底报告（收尾 LLM 失败时由 C 代码写 report.md） |
+
+0001–0014 为九月阶段（初赛），0015–0021 为决赛新增的闭环功能。
+
+---
+
+# 0001-esp32p4-support-for-openvela.patch
 
 ## 这是什么
 

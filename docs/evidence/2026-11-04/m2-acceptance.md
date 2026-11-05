@@ -1,5 +1,14 @@
 # M2 验收：板上实测（2026-11-04 凌晨）
 
+> **编者说明（2026-11-05 文档收尾时补）**
+>
+> (a) 文中验收标准出自 `closed-loop-plan`，该文件是团队内部计划，
+> 未随仓库提交；验收标准以本文表格为准。
+> (b) 文中出现的提交号均指 GerMa365 fork 的 `feature/closed-loop` 分支。
+> (c) 原始日志位置：本文引用的 `m2-guard-healthy.log`、
+> `m2-recover-l1.log`、`m2-pid-probe.log` 均在本目录（已随仓库提交）；
+> 本文没有仅存本地的原始日志。
+
 固件 = M2+M3 全量（recover_task 工具 + buggy_app 改造 + Skill v2 +
 PID 时序修复），构建 2026-11-04 02:48（nuttx.bin 906120 B），
 `tools/hil/flash.sh` 烧录（0x2000，Hash 校验通过）。

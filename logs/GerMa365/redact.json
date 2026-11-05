@@ -1,0 +1,7 @@
+[
+  {
+    "pattern": "tp-[A-Za-z0-9_-]{20,}",
+    "replacement": "tp-***REDACTED***",
+    "flags": ""
+  }
+]
