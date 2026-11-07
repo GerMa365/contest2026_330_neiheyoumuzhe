@@ -26,9 +26,10 @@
 2. **不读取、不打印、不提交 `packages/ai_agent/include/agent_secrets.h`**。日志、证据、提交信息里出现 API Key 或 `Authorization` 头，必须先删掉再保存。AI Coding 日志会公开提交给评审。
 3. **不执行 `repo sync`**：它会重置 nuttx、apps、packages 等目录，打过的补丁全部丢失。确需同步时写进 blockers 等 Ghee 决定。
 4. 不改 `CONFIG_ESP_SYSTEM_MEMPROT`（已知会导致无法启动）。
-5. 不删除、不改写已有的补丁 0001–0014、`docs/evidence/` 下已有日志、`logs/` 下已有文件。
+5. 不删除、不改写已有的补丁 0001–0021 及之后已提交的补丁、`docs/evidence/` 下已有日志、`logs/` 下已有文件。
 6. 不 `git push --force`，不直接推送到参赛仓库远程，只推送到 `fork`。
 7. 不给 Agent 开放 `reboot`、`kill` 等 shell 命令。所有处置动作只能经由 `recover_task` 工具执行。
+   现状：siliconloop defconfig 中 run_shell 为 FULL 模式，本条目前靠 Skill 约束而非代码强制；切换到 ALLOWLIST 需单独验收，未经 Ghee 同意不改。
 8. 不让 Agent 在运行时生成或编译代码。热修复用的 ELF 由开发阶段预先构建。
 
 ---
@@ -40,7 +41,7 @@
 - **先读后改**：改任何文件前先读懂相关代码。规划里的方案与代码事实冲突时，以代码为准，结论写入 `docs/architecture-notes.md`。
 - **验收靠板上实测**：每条验收标准都要有对应的串口原始日志。不能用"理论上可行""应该能过"代替实测结果。
 - **小步提交**：每满足一条验收标准就提交一次。
-- **完成一个里程碑时**：确认全部验收项都有证据 → 提交 → 打标签 `mN-done` → 写日报 → 汇报并停止。
+- **完成一个里程碑时**：确认全部验收项都有证据 → 按第 11 节复核文档一致性 → 提交 → 打标签 `mN-done` → 写日报 → 汇报并停止。
 
 ---
 
@@ -80,17 +81,22 @@
 - 堆只有约 404 KB，**瓶颈是最大连续空闲块**，不是总空闲量。原 162 轮回归的 8 次失败都发生在第 7 步，原因是序列化约 12.5 KB 请求体时 OOM。
 - 新代码避免单次分配超过 4 KB；优先用静态缓冲区。
 - 每个里程碑都记录关键步骤前后的 `free` 输出（含最大空闲块），与 M0 基线对比。最大空闲块比基线明显变差时停下汇报。
-- ELF 代码段必须放在内部 SRAM（补丁 0013 只放开了 PMP entry 6 与 9 的执行权限），不能放在 PSRAM。
+- **ELF 代码段默认放在内部 SRAM**：现状是补丁 0013 只放开了内部 SRAM（PMP entry 6 与 9）的执行权限，PSRAM 地址范围没有执行权限。
+- **PSRAM 允许开发，但作为独立的实验方向，不与 M4 绑定**，按以下顺序推进，每一步都要有板上实测证据，在 `siliconloop_exp` 配置里做，验收通过后再合并回 `siliconloop`：
+  1. PSRAM 初始化与第二堆注册（只放数据）。同时处理补丁 0002 注释掉 PSRAM MMU 清空遗留的问题。
+  2. 把代码段放进 PSRAM 的实验：为 PSRAM 地址范围增加 PMP 执行权限（新增补丁，不改 0013），并验证 ELF 写入后的缓存写回与指令缓存失效顺序（参照补丁 0014）。
+  3. 只有第 2 步验收通过后，L3 才可以把修复版 ELF 的代码段放进 PSRAM；在此之前 M4 按内部 SRAM 实现。
+- 改动 PMP 配置属于第 9 节第 7 条"不确定是否会损坏板子"的情况：动手前先停下，说明方案与回退办法，等 Ghee 确认。
 
 ---
 
 ## 5. 代码与补丁规范
 
 - **repo 管理的上游目录**：`nuttx/`、`apps/`、`packages/ai_agent/`、`vendor/openvela/`、`nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty/`。在这些目录里的改动**必须导出为补丁**，存到 `REPO/patches/`：
-  - 编号从 `0015` 起连续递增（历史上没有 0006，不要补用）。
-  - 命名：`00NN-<目标仓库>-<简述>.patch`，例如 `0015-ai-agent-recover-task-tool.patch`。
+  - 编号从 `0022` 起连续递增（历史上没有 0006，不要补用）。
+  - 命名：`00NN-<目标仓库>-<简述>.patch`，例如 `0022-ai-agent-l3-hotfix.patch`。
   - 已有补丁的文件需要再改时（如 0008 白名单），**新增一个增量补丁**，不改旧补丁。
-  - 每个新补丁在 `patches/README.md` 补一节，格式与现有一致：性质、目标仓库、基线提交、解决的问题、根因、解法、局限、验证记录。
+  - 每个新补丁在 `patches/README.md` 补一节，格式与现有一致：性质、目标仓库、基线提交、解决的问题、根因、解法、局限、验证记录；同时更新 `patches/README.md` 开头的总索引。
   - 在干净副本上用 `git apply --check` 验证可应用。repo 管理的仓库不能直接 `git clone`，用 `git archive <基线> | tar -x -C /tmp/<dir>` 导出（见 `patches/README.md`）。
   - README "运行方式"里的补丁应用顺序同步更新。
 - **参赛仓库内的代码**（`REPO/app/`、`REPO/board/`、`REPO/tools/`）直接提交。新增应用目录要仿照 `app/hello_app/` 写 Kconfig、Make.defs、Makefile、CMakeLists.txt，并在 `contest2026_330_neiheyoumuzhe.xml` 加 `<linkfile>` 映射。
@@ -112,6 +118,7 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 - 板子复位或烧录后 USB 会重新枚举，等待串口设备重新出现（最多 15 秒）再连接。
 - 硬复位通过串口 RTS/DTR 完成；仍无响应时写进 blockers，等 Ghee 手动复位。
 - 完整演示需要 `agent_secrets.h`。只用 `ls` 确认它存在，不读取其内容。
+- **增量编译不跟踪被间接包含的头文件**：改了被间接包含的头文件后，增量编译可能不会重新编译依赖它的源文件。要 touch 相关源文件或清理后重编，并核实对应 `.o` 文件的时间戳已更新。涉及 `agent_secrets.h` 的检查由 Ghee 手动完成。
 
 ---
 
@@ -119,6 +126,9 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 
 - 每个结论都要有原始串口日志：`REPO/docs/evidence/YYYY-MM-DD/<名称>.log`。汇总写成同目录下的 `.md`，并引用日志文件名。
 - 保存日志前检查并删除密钥、Token、`Authorization` 头。
+- **提交前做密钥扫描**：对暂存的文件运行
+  `grep -lE 'tp-[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,}'`，只输出文件名，有命中必须先处理再提交。MiMo Key 以 `tp-` 开头。
+- AI Coding 日志提交前运行 `validate-log.py`，结果全部通过才提交。
 - 长时间回归用 `nohup` 在后台运行，输出写入文件，会话里定期查看进度，不要阻塞会话。
 - 统计时把**网络 / LLM 服务失败**与**功能失败**分开计数。
 - **场景 A（健康）出现任何一次误处置，立即停止并排查**，这是最重要的指标。
@@ -127,7 +137,7 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 
 ## 8. Git
 
-- 工作分支：`feature/closed-loop`，从参赛仓库的 `dev-ai-contest-2026` 切出。
+- 工作分支：M4 在 `feature/m4` 上开发，从参赛仓库 `dev-ai-contest-2026` 的最新提交切出；M0–M3 在 `feature/closed-loop`。
 - 只推送到 `fork` 远程；PR 由 Ghee 在每个里程碑验收后发起并合入。
 - 提交信息沿用现有风格：`feat(L4): …`、`fix(ai-agent): …`、`docs(evidence): …`、`test(hil): …`。
 - 不提交编译产物和临时文件（参考 `.gitignore`）。
@@ -143,6 +153,8 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 5. 场景 A 出现误处置。
 6. 最大空闲块明显低于基线。
 7. 任何不确定是否会损坏板子或丢失数据的操作。
+8. Ghee 指定板子必须保持特定固件的时间段内（如答辩、演示），不操作板子。
+9. 在 Ghee 指定的时间前，停止所有后台运行的回归任务并释放串口。
 
 停下时在 `docs/blockers.md` 追加一条：
 
@@ -181,3 +193,14 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 
 ## 需要 Ghee 做的事
 ```
+
+---
+
+## 11. 文档一致性
+
+- 改动会影响对外描述的事实时（补丁数量、诊断步数、工具数量、报告段数、Skill 版本与字节数、验收轮数与结果），在同一个提交里全仓库搜索这些数字和说法，逐处更新；历史描述保留，但加上版本或日期限定（如"九月版""截至 YYYY-MM-DD"）。
+- 不写容易过时的派生数字（如文件行数）；确需写时注明统计日期。
+- 每完成一个里程碑，必须复核三处：README 第一节、README 复现步骤里的预期输出、补丁清单和目录树里的补丁计数。
+- 文档引用的提交号必须在参赛仓库中存在；只在 fork 中存在的，注明分支名。
+- 汇总文档引用的原始日志，必须复制进 `docs/evidence/` 并与汇总在同一个提交入库；验收标准要写在汇总文档里，不能只引用不公开的私有文件。
+- 里程碑汇报时，附上这次全仓库搜索的结果。
