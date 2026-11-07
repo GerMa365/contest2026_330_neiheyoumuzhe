@@ -1,0 +1,13 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config LVX_USE_DEMO_CONTEST2026_000_HELLO_APP_FIXED
+	bool "Contest 2026 team 000 hello app fixed (M4 L3 hotfix payload)"
+	default n
+	---help---
+		Enable the fixed buggy_app build. Produces a relocatable ELF
+		(apps/bin/buggy_app_fixed) deployed to /data/patches/ and
+		exec'd by recover_task as the L3 hotfix payload. Not a builtin;
+		never linked into the firmware image.

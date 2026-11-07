@@ -114,3 +114,36 @@
 - 若 M2 板上实测发现 maxfree 持续 <30KB（D5 触发条件），再评估 PSRAM。
 - 存储侧：/data 是 tmpfs，修复包重启即丢（blockers.md 待 SMARTFS 选型），
   与"空间够不够"正交，M4 前必须解决。
+
+## M4 勘误与事实更正（2026-11-08，以代码为准）
+
+**exec_spawn 替代 loader 任务方案（更正 m4-design.md 1.3 节）。**
+m4-design 1.3 原写"exec 替换当前映像，需先 task_create 一个 loader
+任务"。核实 nuttx/binfmt/binfmt_exec.c 与 binfmt_execmodule.c 后更正：
+`exec()`（spawn=false）确实走 exec_swap 替换调用者映像，但同一头文件
+（include/nuttx/binfmt/binfmt.h:341）提供 `exec_spawn()`（spawn=true）：
+以独立任务启动模块、正常返回 pid、不替换调用者，且接受调用方传入的
+`struct symtab_s` 符号表。本配置 `CONFIG_LIBC_EXECFUNCS=y`、
+`CONFIG_EXECFUNCS_HAVE_SYMTAB is not set`——posix_spawn 依赖的 OS
+内置符号表不存在，无法加载可重定位 ELF，因此 posix_spawn 不可行；
+`exec_spawn` + 自备符号表（0022 的 hotfix_exports.c）是此场景下
+NuttX 公开接口内的解法，无需 loader 任务。
+
+**符号表内容来自板上 ELF 实测。** 修复版 buggy_app_fixed
+（6,388 B 可重定位 ELF，MODULE=m 构建路径，与 9 月 buggy_app 同源）
+`nm -u` 审计 16 个导入符号，hotfix_exports.c 逐项精确匹配（2026-11-08）。
+重定位类型 R_RISCV_HI20/LO12_I/LO12_S/CALL_PLT/RELAX/BRANCH/RVC_*，
+与 9 月已在板上加载成功的 elf 示例产物同一集合（.rela.text 218 项，
+无数据段重定位）。
+
+**fwpush 通道（0023）**：修复包经串口 base64 下发到 /data/patches/
+（tmpfs），板端回读重算 FNV-1a-32 校验后才落盘；只防传输误码，不防
+篡改（签名是赛后工作）。ROMFS 编译期内嵌方案被否（"出厂自带补丁"，
+m4-design 第三节选项 D）。
+
+**构建系统事实（防止复发）**：`configure.sh -e` 在 defconfig 变更时
+先 `make distclean`，而 arch/risc-v/src/common/espressif/Make.defs 的
+distclean 规则无条件删除 chip/esp-hal-3rdparty——11-07 两次"HAL 工作
+副本消失"皆源于此（blockers.md 2026-11-08 01:14 条）。手工准备的 HAL
+（0002/0005/0013 + mbedtls 0001/0002）需按 blockers 核对清单重放；
+defconfig 冻结后不再触发。

@@ -216,6 +216,24 @@ int main(void)
     printf("G2: %s\n", out);
     assert(strstr(out, "cli_only") != NULL);
 
+    /* ── H. L3 hotfix (M4): with the payload absent (host has no
+     *    exec_spawn at all - compiled out), the ladder must walk
+     *    L1 -> L2 -> L3 and exhaust to needs_human with the level:2
+     *    terminal verdict. action=hotfix must be accepted as a valid
+     *    level (not m4_deferred, not whitelist-refused). ──────────── */
+    reset_env();
+    w = spawn_worker(3); /* stalled; L1 can't help, L2 respawn fails */
+    write_pid(w);
+    call_tool("hotfix", "buggy_app", out, sizeof(out));
+    printf("H: %s\n", out);
+    assert(strstr(out, "needs_human") != NULL
+        || strstr(out, "recurred") != NULL);
+    assert(strstr(out, "\"level\":2") != NULL
+        || strstr(out, "\"level\":3") != NULL);
+    assert(access(NEEDS, F_OK) == 0 && "exhausted ladder must flag human");
+    kill(w, SIGKILL);
+    waitpid(w, NULL, 0);
+
     printf("RECOVER GUARD TESTS: ALL GREEN\n");
     return 0;
 }

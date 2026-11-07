@@ -170,3 +170,55 @@
      后我重试 API（风险：凭据权限扩大，需自行权衡；用完可收回）。
   3. Ghee 在 GitHub 网页手动建 PR，标题/正文粘贴我给的文本。
 - 需要 Ghee 做什么：三选一即可；选项 1 两步（点链接 → Create pull request）。
+
+## 2026-11-07 20:10 · esp-hal-3rdparty 工作副本丢失，重新 clone 后需手工重放 0005/0013
+- 现象：M4 首次构建时发现
+  `nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty/`（build 系统经
+  `arch/risc-v/src/chip -> esp32p4` 符号链接引用的 HAL 工作副本）不存在。
+  11-05 22:34 的答辩版构建还在用它，删除发生在 11-05 22:34 之后、
+  本次 19:46 构建之前；bash 历史与构建规则里均找不到删除动作，根因未定论。
+  本次构建的自动 clone 又因网络中断（HTTP/2 CANCEL）失败了一次。
+- 已尝试 / 已排除的假设：
+  - 已排除"本次构建误删"：make 只在目标缺失时才走 clone，删除在先。
+  - 已排除"bash 历史中的 rm"：无涉及该路径的删除命令。
+  - /home/w/Project/knowngood_esp32p4/ 有一份 2026-08-13 的旧副本，但早于
+    全部 SiliconLoop 补丁（MEMPROT 原样），不可直接使用。
+- 影响与恢复路径（无板子风险，纯构建侧）：
+  1. 重新 clone（Make.defs 自动 apply 0002 + mbedtls 补丁）；
+  2. 手工重放 `0005-esp-hal-eth-link-timer-wdog.patch`（EMAC 需要）与
+     `0013-esp32p4-pmp-allow-execute-from-heap.patch`（ELF 加载需要）——
+     这两个不在任何自动挂钩里，原工作副本上是手工打的；
+  3. 核对 `cpu_region_protect.c` RWX 与 `esp_eth.c` wdog 在位后重建。
+- 后续建议（赛后）：把 0005/0013 一并纳入 `esp32p4/Make.defs` 的
+  `.siliconloop_ready` 自动补丁块，消除"重 clone 后漏打手工补丁"的坑。
+- 需要 Ghee 做什么：知悉；答辩版固件文件（~/siliconloop-defense-1105.bin）
+  不受任何影响（它是独立 .bin，与 HAL 工作副本无关）。
+
+## 2026-11-08 01:14 · HAL 工作副本再次丢失，根因已定位：configure.sh -e 触发 distclean 删除 HAL
+- 现象：11-07 深夜重建 HAL（c6 副本拷贝 + checkout 8d0a8989 + mbedtls 0001/0002
+  + HAL 0002/0005/0013 全部就位、.siliconloop_ready 已建）之后，带 PATH 重建
+  固件时构建日志第 13 行出现 "Cloning Espressif HAL"，正在准备的 HAL 目录再次
+  被清空重新 clone（且本次 clone 因网络 HTTP/2 中断失败）。同时查明了
+  11-07 20:10 那次"删除根因未定论"的真相。
+- 根因（代码级确认，非猜测）：
+  1. `nuttx/tools/configure.sh -e <config>` 在 .config 与备份 defconfig 有差异
+     时先跑 `make distclean`（configure.sh:114 distclean=y → :221）。
+  2. `arch/risc-v/src/common/espressif/Make.defs:222` 的 `distclean::` 规则
+     无条件 `rm -rf chip/esp-hal-3rdparty`——包括我们手工准备的工作副本。
+  3. build.sh 每次跑 savedefconfig，把 defconfig 变更写回 nuttx/defconfig；
+     我在 defconfig 加了 HELLO_APP_FIXED=y → 下一次 configure.sh -e 判定
+     "有配置变化" → distclean → HAL 被删。
+  4. 11-07 20:10 的"删除"也是同一机制（那次也是改了 defconfig 后构建），
+     不是人为误删。
+- 影响：HAL 重clone 后需重打 mbedtls 0001/0002 + HAL 0002/0005/0013；
+  mbedtls 582ff48 需网络获取（apps_crypto_mbedtls.git 的 79M pack 里没有
+  该 commit；c6 副本的子模块目录是空的）。HAL 已从 c6 副本重新拷贝并
+  checkout 8d0a8989，0002/0005/0013 已重新打上；mbedtls 在网络重试中。
+- 我建议的下一步（防再发，赛后处理，今晚不动 Make.defs）：
+  1. 把 0005/0013 与"从本地副本恢复而非网络 clone"一并写进
+     esp32p4/Make.defs 的 .siliconloop_ready 块（新增补丁，不动上游规则）。
+  2. defconfig 冻结后不再改动（M4 的 HELLO_APP_FIXED=y 已进 .config 与
+     nuttx/defconfig，后续构建 cmp 相等 → 不再触发 distclean）。
+  3. 构建前 `ls chip/esp-hal-3rdparty/.siliconloop_ready` 作为例行检查。
+- 需要 Ghee 做什么：知悉根因（非误删、非网络单因）；若认可建议 1，赛后
+  按"新增补丁"流程落地。今晚 M4 板测不受阻（HAL 已恢复，mbedtls 拉取中）。

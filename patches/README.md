@@ -1,6 +1,6 @@
 # 补丁总索引
 
-20 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
+22 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
 根因、解法、局限与验证记录见下文对应小节。
 
 | 补丁 | 目标仓库 | 内容 |
@@ -25,8 +25,11 @@
 | 0019 | `packages/ai_agent` | recover_task 判定行输出到串口日志 |
 | 0020 | `packages/ai_agent` | L2 重启回退内建名（ELF 未部署时仍可重启） |
 | 0021 | `packages/ai_agent` | 保底报告（收尾 LLM 失败时由 C 代码写 report.md） |
+| 0022 | `packages/ai_agent` | L3 ELF 热修复（exec_spawn + 符号表 + 阶梯第 3 级） |
+| 0023 | `packages/ai_agent` | fwpush 串口下发 CLI（修复包经校验落盘 /data/patches） |
 
-0001–0014 为九月阶段（初赛），0015–0021 为决赛新增的闭环功能。
+0001–0014 为九月阶段（初赛），0015–0021 为决赛新增的闭环功能，
+0022–0023 为 M4（L3 热修复）新增（2026-11-08）。
 
 ---
 
@@ -974,3 +977,129 @@ write_file 成功写 report.md、或新会话开始都会撤防。内容 = 判�
 
 → 提交版本默认闭环模式保持 auto（README 第五节写明降级条件与
 切换方法）。
+
+# 0022-ai-agent-l3-hotfix.patch
+
+## 性质：能力补充（M4 L3 热修复），增量补丁
+
+0019/0020/0021 的续篇（应用顺序 0007 → … → 0021 → 0022 → 0023）。
+恢复阶梯从两级扩为三级：L1 resume → L2 restart → **L3 hotfix**（停掉
+故障任务，用 exec_spawn 从 /data/patches/buggy_app_fixed 加载修复版
+ELF 顶替）。本补丁同时修正 0017 的导出遗漏：Makefile/CMakeLists.txt
+当时漏加了 `src/tools/tool_recover.c` 的 CSRCS 行（工作树有、补丁无，
+干净基线应用 0017 后 tool_recover.c 不会被编译），此处一并带上。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0021 应用后的树（0007 → … → 0021 全链 `git apply` 干净副本，含
+0017 遗漏修正的上下文）。
+
+## 解决的问题
+
+L2 重启对"代码缺陷"类故障无效：重启只是把同一份带 bug 的二进制再跑
+一遍，故障必然复现（场景 C 的核心现象）。阶梯需要能真正替换故障代码
+的一级——把修复版（与 buggy_app 仅一处行为差异：drain 路径无条件
+释放槽位）作为可重定位 ELF 在运行时加载。
+
+## 根因
+
+exec 家族在本配置下的可用面：`CONFIG_LIBC_EXECFUNCS=y` 但
+`CONFIG_EXECFUNCS_HAVE_SYMTAB is not set`——posix_spawn 依赖的 OS
+内置符号表不存在，无法加载可重定位 ELF；`exec()`（替换映像变体）会
+把 ai_agent 自己换掉。NuttX binfmt 提供的、支持调用方传入符号表的
+接口是 `exec_spawn()`（binfmt.h，独立任务启动、返回 pid、不替换
+调用者），调用者需自备 `struct symtab_s` 表。
+
+## 解法
+
+- `tool_recover.c`：新增 `rung_hotfix()`（L3）：payload 存在性与大小
+  守卫（52B–16KB）→ `stop_task()`（SIGTERM + 轮询退出）→
+  `exec_spawn(HOTFIX_ELF_PATH, argv, NULL, g_hotfix_exports,
+  g_hotfix_nexports, NULL, &attr)`（attr 带与原注册一致的 priority 50 /
+  stacksize 4096，argv 透传原 mode）→ 6s 后复采样。阶梯循环上限 2→3；
+  `action:"hotfix"` 映射 level 2；`level_name` 扩为
+  {resume, restart, hotfix}；保底报告结论行补 L3 分支。判定 JSON 仍
+  ≤256B；LLM 侧无任何变化（Skill 只提 resume，阶梯在 C 代码内自动
+  爬升——LLM 不可直达 L3，符合"LLM 提议、C 裁决"）。
+- `hotfix_exports.c/.h`（新增）：L3 专用导出表，内容 = 修复版 ELF 的
+  `nm -u` 审计清单（2026-11-08，16 符号：fclose fopen fprintf fputs
+  getpid printf pthread_create pthread_mutex_lock pthread_mutex_unlock
+  puts sched_getparam sched_setparam signal sleep strcmp usleep），
+  逐项精确匹配，不多导出。payload 源码变更时须重跑审计并同步本表。
+- `agent_main.c`：Phase 0 补 `mkdir /data/ai_agent/patches`。
+- host 测试：`SILILOOP_HOST_TEST` 编译期剥离 exec_spawn 路径（glibc 无
+  此 API 也无 spawnattr.priority），host 上 L3 视为 rung 失败、阶梯
+  走到 needs_human——L3 的真实验证在板上（验收表第 2–5 项）。
+
+## 局限
+
+- payload 驻留 tmpfs，复位即失，每轮由 fwpush（0023）重推；Flash
+  持久化是赛后工作（SmartFS 方向）。
+- 符号表是静态白名单：payload 新增导入而表未同步 → 加载期符号解析
+  失败 → 阶梯升级 needs_human（安全方向的失败）。
+- FNV-1a 校验只防传输误码，不防篡改；payload 签名校验是赛后工作。
+- ELF 代码段落在内部 SRAM（0013 已放开的 PMP 范围）；PSRAM 执行是
+  独立实验方向，与 M4 不绑定。
+
+## 验证记录
+
+- 干净副本全链 0007 → … → 0021 → 0022 → 0023 `git apply` 通过，
+  逐文件与工作树 `diff` 一致（2026-11-08）。
+- host 测试（ASan/UBSan，recover_guard_test + fallback_report_test +
+  asround_test）ALL GREEN（2026-11-08）。
+- 符号审计：`nm -u apps/bin/buggy_app_fixed` 16 项 = 导出表 16 项
+  （2026-11-08，见 docs/evidence/2026-11-08/ 符号核对单）。
+- 板上验收：待跑（验收表 smoke → C×5 → A×10 → 失败路径 → 持续运行
+  → B×3），证据入 docs/evidence/2026-11-08/。
+
+# 0023-ai-agent-hotfix-push-cli.patch
+
+## 性质：能力补充（M4 修复包下发通道），增量补丁
+
+只改 `src/channels/nsh_commands.c`：新增 `fwpush` CLI 命令。与 0022
+配套，应用顺序在其后。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0022 应用后的 nsh_commands.c。
+
+## 解决的问题
+
+修复版 ELF 需要进入板上的 /data/patches/（tmpfs）。备选方案里
+ROMFS 编译期内嵌等于"出厂自带补丁"，违背热修复命题（m4-design 第三节
+选项 D，仅作兜底）；串口下发让"构建 → 推包 → Agent 发现 → 热替换"
+全链路可见，且 /data 为 tmpfs、不碰 Flash。
+
+## 根因
+
+板上没有任何现成的大文件传输通道（nsh 无 rz/sz；LLM 工具通道按设计
+不运载数据文件）。
+
+## 解法
+
+`vela> fwpush <total_bytes> <fnv1a_hex>` 进入接收态，读 base64 行
+（每行解码后 ≤512B，行缓冲 1024B），`fwpush_end` 结束；总量硬上限
+16KB，超限/坏块/短读一律删除半成品拒用。落盘前**回读全文件重算
+FNV-1a-32**（板端与主机各算一遍），校验一致才把文件留在
+/data/patches/buggy_app_fixed——损坏传输在源头被拦下（这同时是验收
+表"坏包"路径的前半段）。FNV-1a 只防传输误码，不防篡改（签名是赛后
+工作）；命令仅人工 CLI 可达，LLM 工具面无此入口。
+
+## 局限
+
+- 921600 波特下 ~6.4KB payload 传输约 10s 量级，可接受；更大队长不
+  适合本通道（16KB 硬上限）。
+- 无重传：传输中断即整包作废，重新执行 fwpush 即可。
+
+## 验证记录
+
+- 干净副本链上 `git apply` 通过、与工作树一致（2026-11-08）。
+- 板上：smoke 测试正常包过验、截断/篡改包被拒（验收表第 1 项，待跑）。

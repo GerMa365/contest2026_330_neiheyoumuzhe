@@ -162,7 +162,9 @@ int main(void)
     printf("A: report (%d bytes)\n%s\n", n, rep);
     assert(strstr(rep, "LLM unavailable: fallback report") != NULL);
     assert(strstr(rep, "target: buggy_app") != NULL);
-    assert(strstr(rep, "level: 2") != NULL);
+    /* M4: the ladder is L1->L2->L3; exhaustion after the (no-op) hotfix
+     * rung reports the terminal level 3. */
+    assert(strstr(rep, "level: 3") != NULL);
     assert(strstr(rep, "action: restart") != NULL);
     assert(strstr(rep, "pre_delta: 0") != NULL);
     assert(strstr(rep, "post_delta: ") != NULL);
@@ -170,8 +172,8 @@ int main(void)
     assert(strstr(rep, "result: needs_human") != NULL
         || strstr(rep, "result: recurred") != NULL);
     assert(strstr(rep, "## Conclusion") != NULL);
-    assert(strstr(rep, "code defect") != NULL
-        && "A: conclusion rule = fault after L2");
+    assert(strstr(rep, "buggy_app_fixed") != NULL
+        && "A: conclusion rule = fault persisted through the hotfix rung");
     kill(w, SIGKILL);
     waitpid(w, NULL, 0);
 

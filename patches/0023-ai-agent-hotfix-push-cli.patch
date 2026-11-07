@@ -1,0 +1,192 @@
+diff --git a/src/channels/nsh_commands.c b/src/channels/nsh_commands.c
+index 81b8b44..af1ccb8 100644
+--- a/src/channels/nsh_commands.c
++++ b/src/channels/nsh_commands.c
+@@ -66,6 +66,9 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
++#include <errno.h>
++#include <sys/stat.h>
++
+ #ifdef CONFIG_BOARDCTL_RESET
+ #include <sys/boardctl.h>
+ #endif
+@@ -313,6 +316,158 @@ static void cmd_heap_info(void)
+         mi.arena, mi.fordblks, mi.uordblks);
+ }
+ 
++/* ── SiliconLoop M4: fwpush - serial hotfix payload transfer ──────── */
++
++#define FWPUSH_PATH     "/data/patches/buggy_app_fixed"
++#define FWPUSH_MAX      (16 * 1024)
++#define FWPUSH_CHUNK    512      /* base64 chars per decoded chunk */
++
++static unsigned int fwpush_fnv1a(const unsigned char *data, size_t len)
++{
++    /* FNV-1a 32-bit: guards transport bit errors only (not tampering;
++     * payload signatures are a post-defense item). */
++    unsigned int h = 2166136261u;
++    for (size_t i = 0; i < len; i++) {
++        h ^= data[i];
++        h *= 16777619u;
++    }
++    return h;
++}
++
++static int fwpush_b64val(char c)
++{
++    if (c >= 'A' && c <= 'Z') return c - 'A';
++    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
++    if (c >= '0' && c <= '9') return c - '0' + 52;
++    if (c == '+') return 62;
++    if (c == '/') return 63;
++    return -1;
++}
++
++/* Decode one base64 line into out; returns bytes written or -1. */
++static int fwpush_b64line(const char *line, unsigned char *out,
++    size_t outcap)
++{
++    size_t n = strlen(line);
++    while (n > 0 && (line[n - 1] == '\r' || line[n - 1] == '\n'
++        || line[n - 1] == ' ')) {
++        n--;
++    }
++    if (n == 0 || n % 4 != 0) {
++        return -1;
++    }
++    size_t olen = n / 4 * 3;
++    if (line[n - 1] == '=') olen--;
++    if (line[n - 2] == '=') olen--;
++    if (olen > outcap) {
++        return -1;
++    }
++    size_t o = 0;
++    for (size_t i = 0; i < n; i += 4) {
++        int v[4];
++        for (int k = 0; k < 4; k++) {
++            v[k] = fwpush_b64val(line[i + k]);
++            if (v[k] < 0 && line[i + k] != '=') {
++                return -1;
++            }
++        }
++        if (o < olen) out[o++] = (v[0] << 2) | (v[1] >> 4);
++        if (o < olen) out[o++] = ((v[1] & 0xf) << 4) | (v[2] >> 2);
++        if (o < olen) out[o++] = ((v[2] & 0x3) << 6) | v[3];
++    }
++    return (int)o;
++}
++
++static void cmd_fwpush(int argc, char** argv)
++{
++    unsigned char buf[FWPUSH_CHUNK];
++    char line[1024];
++    unsigned long total;
++    unsigned int want_sum;
++
++    if (argc < 3) {
++        printf("usage: fwpush <total_bytes> <fnv1a_hex> ; then base64 "
++            "lines, terminated by the line fwpush_end\n");
++        return;
++    }
++    total = strtoul(argv[1], NULL, 10);
++    want_sum = (unsigned int)strtoul(argv[2], NULL, 16);
++    if (total == 0 || total > FWPUSH_MAX) {
++        printf("fwpush: rejected size %lu (limit %d)\n", total,
++            FWPUSH_MAX);
++        return;
++    }
++
++    mkdir("/data", 0755);
++    mkdir("/data/ai_agent", 0755);
++    mkdir("/data/patches", 0755);
++
++    FILE *f = fopen(FWPUSH_PATH, "w");
++    if (!f) {
++        printf("fwpush: open %s failed (errno=%d)\n", FWPUSH_PATH, errno);
++        return;
++    }
++
++    unsigned long got = 0;
++    while (got < total) {
++        if (!fgets(line, sizeof(line), stdin)) {
++            printf("fwpush: input ended early (%lu/%lu)\n", got, total);
++            goto fail;
++        }
++        if (strncmp(line, "fwpush_end", 10) == 0) {
++            break;
++        }
++        int n = fwpush_b64line(line, buf, sizeof(buf));
++        if (n <= 0 || got + (unsigned long)n > total) {
++            printf("fwpush: bad chunk (n=%d, got=%lu)\n", n, got);
++            goto fail;
++        }
++        if (fwrite(buf, 1, (size_t)n, f) != (size_t)n) {
++            printf("fwpush: write failed (errno=%d)\n", errno);
++            goto fail;
++        }
++        got += (unsigned long)n;
++    }
++    fclose(f);
++    f = NULL;
++
++    if (got != total) {
++        printf("fwpush: size mismatch got=%lu want=%lu\n", got, total);
++        goto fail_noclose;
++    }
++
++    /* Verify by reading back: what was checked is what was stored. */
++    {
++        static unsigned char rb[FWPUSH_MAX];
++        f = fopen(FWPUSH_PATH, "r");
++        if (!f) {
++            printf("fwpush: reopen failed\n");
++            goto fail_noclose;
++        }
++        size_t rlen = fread(rb, 1, sizeof(rb), f);
++        fclose(f);
++        f = NULL;
++        if (rlen != total
++            || fwpush_fnv1a(rb, rlen) != want_sum) {
++            printf("fwpush: CHECKSUM MISMATCH rlen=%zu sum=%08x "
++                "want=%08x - payload deleted\n",
++                rlen, fwpush_fnv1a(rb, rlen), want_sum);
++            goto fail_noclose;
++        }
++        printf("fwpush: OK %lu bytes, fnv1a=%08x -> %s\n", got, want_sum,
++            FWPUSH_PATH);
++        return;
++    }
++
++fail:
++    fclose(f);
++    f = NULL;
++fail_noclose:
++    unlink(FWPUSH_PATH);
++    return;
++}
++
++
+ static void cmd_set_proxy(int argc, char** argv)
+ {
+     if (argc < 3) {
+@@ -949,6 +1104,18 @@ static void* cli_thread(void* arg)
+                 printf("usage: recover_task reset | recover_task test <n>\n");
+             }
+         }
++        else if (strcmp(cmd, "fwpush") == 0) {
++            /* SiliconLoop M4: push the hotfix payload over the serial
++             * line. Human CLI only (never reachable from an LLM tool
++             * call): fwpush <total_bytes> <fnv1a_hex> then base64
++             * chunks end with the line "fwpush_end". The file lands at
++             * /data/patches/buggy_app_fixed only after size + checksum
++             * verification; a mismatch deletes it so a corrupt payload
++             * can never be exec'd. FNV-1a guards against transport
++             * bit errors only - payload authenticity (signature) is a
++             * post-defense roadmap item. */
++            cmd_fwpush(argc, argv);
++        }
+         else if (strcmp(cmd, "net_status") == 0)
+             cmd_net_status();
+         else if (strcmp(cmd, "net_test") == 0)

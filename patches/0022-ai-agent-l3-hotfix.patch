@@ -1,0 +1,365 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f1b6b4a..757a625 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -41,6 +41,8 @@ if(CONFIG_EXAMPLES_AI_AGENT_VELA)
+     src/channels/cmd_channel.c
+     src/channels/ws_server.c
+     src/tools/tool_registry.c
++    src/tools/tool_recover.c
++    src/tools/hotfix_exports.c
+     src/tools/tool_files.c
+     src/tools/tool_get_time.c
+     src/tools/tool_web_search.c
+diff --git a/Makefile b/Makefile
+index 1dfc116..a0de9ef 100644
+--- a/Makefile
++++ b/Makefile
+@@ -61,6 +61,8 @@ CSRCS += src/llm/llm_cache.c
+ 
+ # tools/ - 工具系统（注册表、MCP、安全、技能）
+ CSRCS += src/tools/tool_registry.c
++CSRCS += src/tools/tool_recover.c
++CSRCS += src/tools/hotfix_exports.c
+ CSRCS += src/tools/tool_files.c
+ CSRCS += src/tools/tool_get_time.c
+ CSRCS += src/tools/tool_web_search.c
+diff --git a/src/agent_main.c b/src/agent_main.c
+index 5b7b09c..2bd585f 100644
+--- a/src/agent_main.c
++++ b/src/agent_main.c
+@@ -502,6 +502,7 @@ int ai_agent_main(int argc, char* argv[])
+     mkdir(AGENT_DATA_DIR "/memory", 0755);
+     mkdir(AGENT_DATA_DIR "/sessions", 0755);
+     mkdir(AGENT_DATA_DIR "/skills", 0755);
++    mkdir(AGENT_DATA_DIR "/patches", 0755);
+     mkdir(AGENT_DATA_DIR "/evidence", 0755);
+     BOOT_LOG(&t0, "P0", "storage ready");
+ 
+diff --git a/src/tools/hotfix_exports.c b/src/tools/hotfix_exports.c
+new file mode 100644
+index 0000000..1155ebb
+--- /dev/null
++++ b/src/tools/hotfix_exports.c
+@@ -0,0 +1,40 @@
++/* SiliconLoop M4: symbol table for the L3 hotfix payload loader.
++ * Recover_task exec's /data/patches/buggy_app_fixed through exec_spawn()
++ * with THIS table - the same pattern as apps/examples/elf (mksymtab),
++ * but a hand-maintained exact-match table instead of a firmware-wide
++ * scan. Contents are the `nm -u` import list of apps/bin/buggy_app_fixed
++ * (symbol audit 2026-11-08, 16 symbols: fclose fopen fprintf fputs
++ * getpid printf pthread_create pthread_mutex_lock pthread_mutex_unlock
++ * puts sched_getparam sched_setparam signal sleep strcmp usleep), so
++ * every import resolves and nothing extra is exposed. Re-run the audit
++ * (nm -u apps/bin/buggy_app_fixed) whenever the payload source changes
++ * and update this table in the same commit. */
++#include "tools/hotfix_exports.h"
++
++#include <stdio.h>
++#include <unistd.h>
++#include <signal.h>
++#include <pthread.h>
++#include <sched.h>
++
++const HOTFIX_SYMTAB g_hotfix_exports[] = {
++	{ "fclose", (void *)fclose },
++	{ "fopen", (void *)fopen },
++	{ "fprintf", (void *)fprintf },
++	{ "fputs", (void *)fputs },
++	{ "getpid", (void *)getpid },
++	{ "printf", (void *)printf },
++	{ "pthread_create", (void *)pthread_create },
++	{ "pthread_mutex_lock", (void *)pthread_mutex_lock },
++	{ "pthread_mutex_unlock", (void *)pthread_mutex_unlock },
++	{ "puts", (void *)puts },
++	{ "sched_getparam", (void *)sched_getparam },
++	{ "sched_setparam", (void *)sched_setparam },
++	{ "signal", (void *)signal },
++	{ "sleep", (void *)sleep },
++	{ "strcmp", (void *)strcmp },
++	{ "usleep", (void *)usleep },
++};
++
++const int g_hotfix_nexports = sizeof(g_hotfix_exports)
++	/ sizeof(g_hotfix_exports[0]);
+diff --git a/src/tools/hotfix_exports.h b/src/tools/hotfix_exports.h
+new file mode 100644
+index 0000000..2b76ed1
+--- /dev/null
++++ b/src/tools/hotfix_exports.h
+@@ -0,0 +1,34 @@
++/* SiliconLoop M4: symbol table for the L3 hotfix payload loader.
++ * recover_task exec's /data/patches/buggy_app_fixed through
++ * exec_spawn() with THIS table - the same pattern as
++ * apps/examples/elf/main/test_symtab.c, extended with the symbols the
++ * fixed build actually imports (see the M4 acceptance symbol audit).
++ * Host tests compile tool_recover.c without nuttx headers; this header
++ * mirrors the minimal symtab type there. */
++#pragma once
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#ifdef SILILOOP_HOST_TEST
++struct hotfix_symtab_s {
++    const char *name;
++    void *addr;
++};
++#define HOTFIX_SYMTAB struct hotfix_symtab_s
++#else
++/* SiliconLoop: sys/types.h pulls in nuttx/compiler.h, which defines FAR -
++ * symtab.h itself relies on the includer having done that (it does not
++ * include compiler.h on its own). */
++#include <sys/types.h>
++#include <nuttx/symtab.h>
++#define HOTFIX_SYMTAB struct symtab_s
++#endif
++
++extern const HOTFIX_SYMTAB g_hotfix_exports[];
++extern const int g_hotfix_nexports;
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/src/tools/tool_recover.c b/src/tools/tool_recover.c
+index 5c801b9..5927807 100644
+--- a/src/tools/tool_recover.c
++++ b/src/tools/tool_recover.c
+@@ -22,7 +22,11 @@
+  *     L1 resume   SIGUSR1 -> buggy_app re-enables its consumer
+  *     L2 restart  SIGTERM + respawn the SAME workload (saved mode file),
+  *                 so a code bug re-manifests and the ladder keeps walking
+- *   (L3 ELF hotfix is deferred with M4; the rung above L2 is the human.)
++ *     L3 hotfix   stop task + exec_spawn /data/patches/buggy_app_fixed
++ *                 with the hotfix symbol table (M4): the fixed build
++ *                 re-publishes pid/mode and its heartbeat advances
++ *   (Ladder exhausted = needs_human; the human clears it with the CLI
++ *   verb recover_task reset.)
+  *
+  *   Post-check: two samples 1.5 s apart, delta > 0 => recovered at that
+  *   rung. Recurrence watch (M3): observe one more heartbeat period and
+@@ -49,12 +53,14 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/stat.h>
+ #include <time.h>
+ #include <unistd.h>
+ 
+ #include "agent_compat.h"
+ #include "agent_config.h"
+ #include "cJSON.h"
++#include "tools/hotfix_exports.h"
+ #include "tools/tool_recover.h"
+ 
+ static const char *TAG = "recover";
+@@ -159,14 +165,25 @@ static void fb_render(const char *target, int level, const char *action,
+         /* rule: L1 recovery = a temporary stall */
+         conclusion = "recovered after the L1 (resume) rung: a temporary "
+             "stall; the consumer was re-enabled";
+-    } else if (strcmp(result, "recovered") == 0) {
++    } else if (strcmp(result, "recovered") == 0 && level == 2) {
+         conclusion = "recovered after the L2 (restart) rung: the old "
+             "task instance was replaced";
+-    } else {
+-        /* rule: fault present after L2 = likely code defect */
++    } else if (strcmp(result, "recovered") == 0 && level == 3) {
++        conclusion = "recovered after the L3 (hotfix) rung: the faulty "
++            "build was replaced by the fixed ELF from /data/patches";
++    } else if (level >= 3) {
++        /* rule: fault present even after L3 = the hotfix did not hold */
++        conclusion = "the fault persisted through the L1/L2/L3 ladder "
++            "(incl. the hotfix rung): the fixed ELF must be inspected; "
++            "a human needs to review /data/patches/buggy_app_fixed";
++    } else if (level == 2 && strcmp(result, "needs_human") == 0) {
++        /* rule: ladder exhausted below/at L2 without hotfix executing */
+         conclusion = "the fault persisted through the L1/L2 ladder "
+             "(incl. L2 restart): a code defect is likely and the "
+             "buggy_app source needs a review";
++    } else {
++        conclusion = "the fault persisted through the recovery ladder: "
++            "a human needs to review the system";
+     }
+ 
+     snprintf(s_fb_report, sizeof(s_fb_report), s_fb_template,
+@@ -316,6 +333,25 @@ static int verify_pid_target(pid_t pid)
+     return ok;
+ }
+ 
++/* ── L3 hotfix (M4) ─────────────────────────────────────────────── */
++
++/* Payload location. /data is tmpfs on this board: the payload is pushed
++ * per-session by the operator (fwpush) and does not survive reboot;
++ * Flash persistence is a post-defense roadmap item (SmartFS). */
++#define HOTFIX_ELF_PATH AGENT_DATA_DIR "/patches/buggy_app_fixed"
++/* Refuse absurd payloads early; the real one is ~5 KB. */
++#define HOTFIX_MAX_BYTES (16 * 1024)
++
++/* SiliconLoop: exec_spawn() is NuttX binfmt's caller-provided-symbol-table
++ * loader that starts a NEW task and returns (binfmt.h: exec_spawn).
++ * posix_spawn() is not an option here: CONFIG_EXECFUNCS_HAVE_SYMTAB is
++ * off, so the OS-side symbol table posix_spawn relies on does not exist
++ * and the relocatable ELF could not be linked. exec() (the image-swap
++ * variant used by the elf example) would replace the agent's own image. */
++#ifndef SILILOOP_HOST_TEST
++#include <nuttx/binfmt/binfmt.h>
++#endif
++
+ static int stop_task(void)
+ {
+     pid_t pid;
+@@ -353,6 +389,76 @@ static void flag_needs_human(void)
+     }
+ }
+ 
++/* Payload sanity before handing the file to the loader: exists, regular,
++ * size within [sizeof(Elf32_Ehdr), HOTFIX_MAX_BYTES]. A truncated or
++ * hostile file must fail HERE, not inside load_module. */
++#ifndef SILILOOP_HOST_TEST
++static int hotfix_payload_ok(const char *path)
++{
++    struct stat st;
++    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
++        syslog(LOG_WARNING, "[%s] hotfix payload missing: %s\n", TAG, path);
++        return ERROR;
++    }
++    if (st.st_size < 52 || st.st_size > HOTFIX_MAX_BYTES) {
++        syslog(LOG_WARNING, "[%s] hotfix payload size invalid: %ld\n",
++            TAG, (long)st.st_size);
++        return ERROR;
++    }
++    return OK;
++}
++#endif /* !SILILOOP_HOST_TEST */
++
++/* L3: stop the faulty task, exec the fixed ELF as a NEW task (exec_spawn
++ * keeps the agent alive and returns the new pid), and let the fixed
++ * build re-publish its identity files. On spawn failure the payload is
++ * left in place (operator may re-push it) and the ladder escalates.
++ * Host tests have no NuttX exec_spawn (and glibc's spawnattr has no
++ * priority field): compiled out there; L3 coverage is board acceptance. */
++#ifndef SILILOOP_HOST_TEST
++static int rung_hotfix(const char *mode, long *post_delta)
++{
++    pid_t pid;
++    char *argv[3];
++    posix_spawnattr_t attr;
++
++    if (hotfix_payload_ok(HOTFIX_ELF_PATH) != OK) {
++        return ERROR;
++    }
++
++    stop_task();
++
++    /* Same priority/stack as the buggy build's registration (hello_app
++     * Makefile: PRIORITY 50, STACKSIZE 4096) so the fixed task behaves
++     * like the one it replaces. exec_module reads priority/stacksize
++     * directly off the attr (binfmt_exec.c), no flags needed. */
++    posix_spawnattr_init(&attr);
++    attr.priority = 50;
++    attr.stacksize = 4096;
++
++    argv[0] = (char *)"buggy_app_fixed";
++    if (mode && strcmp(mode, "normal") != 0) {
++        argv[1] = (char *)mode;
++        argv[2] = NULL;
++    } else {
++        argv[1] = NULL;
++    }
++
++    pid = exec_spawn(HOTFIX_ELF_PATH, argv, NULL,
++        g_hotfix_exports, g_hotfix_nexports, NULL, &attr);
++    posix_spawnattr_destroy(&attr);
++    if (pid < 0) {
++        syslog(LOG_ERR, "[%s] exec_spawn(%s) failed: %d\n",
++            TAG, HOTFIX_ELF_PATH, errno);
++        return ERROR;
++    }
++    syslog(LOG_INFO, "[%s] hotfix task started pid=%d\n", TAG, (int)pid);
++
++    usleep(6000000);
++    return measure_delta(post_delta);
++}
++#endif /* !SILILOOP_HOST_TEST */
++
+ /* ── one rung ───────────────────────────────────────────────────── */
+ 
+ /* Returns OK when the rung executed (post_delta set), ERROR when it
+@@ -360,6 +466,7 @@ static void flag_needs_human(void)
+ static int rung(int level, const char *target, long *post_delta)
+ {
+     char mode[32];
++    (void)target; /* L1/L2 act on the pid/mode files; L3 has one payload */
+     read_mode(mode, sizeof(mode));
+ 
+     switch (level) {
+@@ -381,7 +488,13 @@ static int rung(int level, const char *target, long *post_delta)
+         }
+         usleep(6000000);
+         return measure_delta(post_delta);
+-    default: /* L3 hotfix deferred with M4; anything above L2 is human */
++    case 2: /* L3 hotfix: exec the fixed ELF from /data/patches (M4) */
++#ifndef SILILOOP_HOST_TEST
++        return rung_hotfix(mode, post_delta);
++#else
++        return ERROR; /* no exec_spawn on host; ladder exhausts */
++#endif
++    default:
+         return ERROR;
+     }
+ }
+@@ -439,13 +552,7 @@ static int tool_recover_execute_inner(const char *input_json, char *output,
+     int level = -1;
+     if (action && strcmp(action, "resume") == 0) level = 0;
+     else if (action && strcmp(action, "restart") == 0) level = 1;
+-    if (action && strcmp(action, "hotfix") == 0) {
+-        /* M4 (ELF hotfix) is deferred; the rung above L2 is the human */
+-        snprintf(output, output_size,
+-            "{\"result\":\"refused\",\"reason\":\"m4_deferred\"}");
+-        cJSON_Delete(root);
+-        return OK;
+-    }
++    else if (action && strcmp(action, "hotfix") == 0) level = 2;
+ 
+     /* guard: whitelist — nsh/ai_agent/network tasks are untouchable */
+     if (level < 0 || !target
+@@ -548,12 +655,13 @@ static int tool_recover_execute_inner(const char *input_json, char *output,
+ 
+     /* ── walk the ladder from the level the LLM proposed ─────────── */
+     s_recovering = 1;
+-    static const char *const level_name[2] = { "resume", "restart" };
++    static const char *const level_name[3] =
++        { "resume", "restart", "hotfix" };
+     long post_delta = 0;
+     int done_level = -1;
+     int recurred = 0;
+ 
+-    for (int lv = level; lv < 2; lv++) {
++    for (int lv = level; lv < 3; lv++) {
+         if (rung(lv, target, &post_delta) != OK) {
+             /* rung could not run: try the next level */
+             post_delta = -1;
+@@ -581,8 +689,9 @@ static int tool_recover_execute_inner(const char *input_json, char *output,
+         flag_needs_human();
+         const char *why = recurred ? "recurred" : "needs_human";
+         snprintf(output, output_size,
+-            "{\"level\":2,\"action\":\"restart\",\"target\":\"%s\","
++            "{\"level\":%d,\"action\":\"%s\",\"target\":\"%s\","
+             "\"pre_delta\":%ld,\"post_delta\":%ld,\"result\":\"%s\"}",
++            recurred ? 3 : 2, recurred ? "hotfix" : "restart",
+             target, pre_delta, post_delta, why);
+         audit(target, action, pre_delta, post_delta, why);
+     } else {
+@@ -601,8 +710,9 @@ static int tool_recover_execute_inner(const char *input_json, char *output,
+      * the LLM call that writes report.md can still fail at low heap.
+      * agent_loop then calls tool_recover_write_fallback_report(). */
+     fb_render(target,
+-        done_level < 0 ? 2 : done_level + 1,
+-        done_level < 0 ? "restart" : level_name[done_level],
++        done_level < 0 ? (recurred ? 4 : 3) : done_level + 1,
++        done_level < 0 ? (recurred ? "hotfix" : "restart")
++                       : level_name[done_level],
+         pre_delta, post_delta,
+         done_level < 0 ? (recurred ? "recurred" : "needs_human")
+                        : "recovered");

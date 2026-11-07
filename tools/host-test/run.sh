@@ -35,9 +35,12 @@ gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined -I"$CJSON_INC" -I"$OUT" \
 ASAN_OPTIONS=detect_leaks=1 "$OUT/asround_test"
 
 # recover_task guards & escalation: real tool_recover.c, real headers,
-# timings shortened via -D for testability
+# timings shortened via -D for testability. SILILOOP_HOST_TEST compiles
+# out the L3 exec_spawn rung (NuttX-only API; board acceptance covers it
+# - on host the ladder must still exhaust to needs_human at L3).
 gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined \
     -DCONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR='"/tmp/host-test-data"' \
+    -DSILILOOP_HOST_TEST \
     -DCOOLDOWN_S=1 -DRECUR_OBSERVE_S=2 \
     -I"$HERE/stubs" -I"$AI/src" -I"$CJSON_INC" \
     "$HERE/recover_guard_test.c" "$AI/src/tools/tool_recover.c" \
@@ -47,6 +50,7 @@ ASAN_OPTIONS=detect_leaks=1 "$OUT/recover_guard_test"
 # fallback report on LLM failure (2026-11-04): real tool_recover.c again
 gcc -Wall -Wextra -O1 -g -fsanitize=address,undefined \
     -DCONFIG_EXAMPLES_AI_AGENT_VELA_DATA_DIR='"/tmp/host-test-data"' \
+    -DSILILOOP_HOST_TEST \
     -DCOOLDOWN_S=1 -DRECUR_OBSERVE_S=2 \
     -I"$HERE/stubs" -I"$AI/src" -I"$CJSON_INC" \
     "$HERE/fallback_report_test.c" "$AI/src/tools/tool_recover.c" \

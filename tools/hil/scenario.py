@@ -55,7 +55,7 @@ def parse_log(path):
         return {
             "status": "no_log", "iters": 0, "net_fail": False,
             "recover_called": False, "stalled_verdict": False,
-            "recovered": False,
+            "recovered": False, "hotfix_recovered": False,
             "maxfree": None, "oom": 0, "req_peak": None,
             "agent_start_free": None,
         }
@@ -78,6 +78,9 @@ def parse_log(path):
     recover_called = "Executing tool: recover_task" in txt
     # The tool's own one-line verdict. Short line, never truncated.
     recovered_result = '"result":"recovered"' in txt
+    # M4: L3 hotfix specifically recovered - verdict carries level:3.
+    hotfix_recovered = ('"level":3' in txt
+                        and '"result":"recovered"' in txt)
     # C-ladder terminal verdicts: the fault survived L1 and re-manifested
     # after L2, so the ladder marked the target needs_human (or the
     # recurrence watch caught a relapse after a successful rung).
@@ -132,6 +135,7 @@ def parse_log(path):
         "status": status, "iters": iters, "net_fail": net_fail,
         "recover_called": recover_called, "stalled_verdict": stalled_verdict,
         "recovered": recovered_result, "escalated": escalated_result,
+        "hotfix_recovered": hotfix_recovered,
         "maxfree": maxfree,
         "oom": oom_count,
         "req_peak": req_peak,
@@ -151,6 +155,12 @@ def main():
                     help="session window seconds; default per scenario: "
                          "A=420, B=600, C=900 (closed-loop rounds need "
                          "recovery+verification room)")
+    ap.add_argument("--judge", choices=["m3", "m4"], default="m3",
+                    help="C-scenario pass criteria. m3 (default): the "
+                         "ladder runs to a terminal escalated verdict "
+                         "(needs_human) - the M3 acceptance gate, kept "
+                         "reproducible. m4: pass requires an L3 hotfix "
+                         "recovery verdict (level:3 + result:recovered).")
     args = ap.parse_args()
 
     inject = {"A": "buggy_app &", "B": "buggy_app stall &", "C": "buggy_app bug &"}[args.scenario]
@@ -187,14 +197,24 @@ def main():
             verdict["pass"] = (verdict["recover_called"]
                                and verdict["recovered"]
                                and not verdict["net_fail"])
-        else:  # C: L1 ineffective -> L2 restart -> fault re-manifests ->
-            # escalate to human. Pass = the ladder ran AND reached a
-            # terminal escalated verdict AND not a network round. (Before
-            # M4 the ladder ends at needs_human; once L3 lands "recurred"
-            # after L2 is the other accepted terminal.)
-            verdict["pass"] = (verdict["recover_called"]
-                               and verdict.get("escalated", False)
-                               and not verdict["net_fail"])
+        else:  # C: judge mode decides the gate.
+            # m3 (default, M3 acceptance): L1 ineffective -> L2 restart ->
+            # fault re-manifests -> escalate to human. Pass = the ladder
+            # ran AND reached a terminal escalated verdict AND not a
+            # network round. ("recurred" after L2 is the other accepted
+            # terminal; with L3 landed, "recovered" also implies the
+            # ladder terminated well, so it does not fail this gate.)
+            # m4 (M4 acceptance): pass REQUIRES the L3 hotfix verdict -
+            # level:3 with result:recovered, i.e. the fixed ELF replaced
+            # the faulty build and held through the recurrence watch.
+            if args.judge == "m4":
+                verdict["pass"] = (verdict["recover_called"]
+                                   and verdict.get("hotfix_recovered", False)
+                                   and not verdict["net_fail"])
+            else:
+                verdict["pass"] = (verdict["recover_called"]
+                                   and verdict.get("escalated", False)
+                                   and not verdict["net_fail"])
         results.append(verdict)
         print(json.dumps(verdict), flush=True)
         if args.json:
