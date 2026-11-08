@@ -77,6 +77,18 @@ actions.log 正确（`2026-11-04/m2-acceptance.md`）。M3：A×10 误处置 0�
 B×10 恢复率 100%、场景 C 阶梯升级（`2026-11-04/m3-acceptance.md`），
 夜间回归与 Skill 缺口发现见 `2026-11-04/m3-overnight-01.md`。
 
+## 2026-11-08
+
+M4 板上 smoke 与首轮验收（内存回归判定成立，详见
+`2026-11-08/m4-smoke-notes.md`）：fwpush 三例（正例/截断/坏校验和）
+全部通过（`m4-smoke2-push-*.log`）；完整心跳轮与 A/C 轮记录
+（`m4-smoke3-full-round.log`、`m4-smoke4-san.r1`、`m4-A.r1`、
+`m4-C.r1*`、`m4-C.oldfirmware.r1*`）；旧固件对照与烧录 #3 后复验
+（agent 启动 free 120,280 → 136,664，见 smoke-notes 修复节）；
+刷回答辩版后的健康/卡死复检通过（`m4-flashback-A.r1`、
+`m4-flashback-B.r1`）。构建与符号审计单见
+`2026-11-08/m4-build-and-symbol-audit.md`（前一提交）。
+
 ## 复现方式
 
 日志由 picocom 记录：

@@ -1,0 +1,5 @@
+PROBE OK
+HEADER ACK: 'fwpush 6388 df9dc4f8\r\n'
+[266] ANOMALY after sending 'AAAAAA==':
+'AAAAAA==\r\nfwpush: OK 6388 bytes, fnv1a=df9dc4f8 -> /data/ai_agent/patches/buggy_app_fixed\r\nvela> '
+FLUSH-REST: ''

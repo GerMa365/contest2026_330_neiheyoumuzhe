@@ -1,0 +1,156 @@
+
+===== session 2026-11-08 10:16:28 reset=False =====
+
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefdb9735c3b13a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104215
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 2 (backoff 2)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:6aefdb9735c3b13a] iter=0 tool=(none) latency=450ms llm=fail backend=0
+[trace:6aefdb9735c3b13a] END status=fail iters=1 tools=0 llm_ms=450 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefdc0f7c9701b3] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104335
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在分析...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 3 (backoff 4)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:6aefdc0f7c9701b3] iter=0 tool=(none) latency=450ms llm=fail backend=0
+[trace:6aefdc0f7c9701b3] END status=fail iters=1 tools=0 llm_ms=450 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:6aefdc8703cd357a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104455
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed (iter 0)
+[trace:6aefdc8703cd357a] iter=0 tool=(none) latency=420ms llm=fail backend=-1
+[trace:6aefdc8703cd357a] END status=fail iters=1 tools=0 llm_ms=420 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:6aefdcff2746feb7] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104575
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在思考中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed (iter 0)
+[trace:6aefdcff2746feb7] iter=0 tool=(none) latency=440ms llm=fail backend=-1
+[trace:6aefdcff2746feb7] END status=fail iters=1 tools=0 llm_ms=440 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] Auto-recovering backend 0 after 300s
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefdd770830f44a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104695
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在分析...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 1 (backoff 0)
+[agent] LLM call failed (iter 0)
+[trace:6aefdd770830f44a] iter=0 tool=(none) latency=420ms llm=fail backend=0
+[trace:6aefdd770830f44a] END status=fail iters=1 tools=0 llm_ms=420 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefddef73b6c3ea] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104815
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 2 (backoff 2)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:6aefddef73b6c3ea] iter=0 tool=(none) latency=460ms llm=fail backend=0
+[trace:6aefddef73b6c3ea] END status=fail iters=1 tools=0 llm_ms=460 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefde6776c64bb0] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794104935
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 3 (backoff 4)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:6aefde6776c64bb0] iter=0 tool=(none) latency=450ms llm=fail backend=0
+[trace:6aefde6776c64bb0] END status=fail iters=1 tools=0 llm_ms=450 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:6aefdedf61ce8483] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794105055
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed (iter 0)
+[trace:6aefdedf61ce8483] iter=0 tool=(none) latency=450ms llm=fail backend=-1
+[trace:6aefdedf61ce8483] END status=fail iters=1 tools=0 llm_ms=450 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+
+[10:31:28] SESSION OK

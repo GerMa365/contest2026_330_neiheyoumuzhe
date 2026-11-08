@@ -1,0 +1,189 @@
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefcd4403cd357a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794100548
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 0es text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:6aefcd4403cd357a] iter=0 tool=read_file latency=3600ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTBEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9390 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:6aefcd4403cd357a] iter=1 tool=read_file latency=6310ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (3 bytes)
+[agent] Tool read_file result: 3 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10031 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:6aefcd4403cd357a] iter=2 tool=run_shell latency=2200ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10863 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:6aefcd4403cd357a] iter=3 tool=run_shell latency=1420ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11396 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+[vela_tls] Pooled connection stale, reconnecting
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794100562
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:6aefcd4403cd357a] iter=4 tool=read_file latency=2010ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (3 bytes)
+[agent] Tool read_file result: 3 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11770 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+[vela_tls] Pooled connection stale, reconnecting
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794100564
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Write request failed: -5
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 1 (backoff 0)
+[agent] LLM call failed (iter 5)
+[trace:6aefcd4403cd357a] iter=5 tool=(none) latency=600ms llm=fail backend=0
+[trace:6aefcd4403cd357a] END status=fail iters=6 tools=5 llm_ms=16140 elapsed=16s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:6aefcdbc2746feb7] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794100668
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在思考中...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:6aefcdbc2746feb7] iter=0 tool=read_file latency=2350ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9383 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:6aefcdbc246feb7] iter=1 tool=read_file latency=2720ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (3 bytes)
+[agent] Tool read_file result: 3 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9815 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:6aefcdbc2746feb7] iter=2 tool=run_shell latency=1440ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10639 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:6aefcdbc2746feb7] iter=3 tool=run_shell latency=1980ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11186 bytes, alloc_fail=0 +0
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:6aefcdbc2746feb7] iter=4 tool=read_file latency=5560ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (3 bytes)
+[agent] Tool read_file result: 3 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11618 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 6: 1 calls
+[trace:6aefcdbc2746feb7] iter=5 tool=recover_task latency=2820ms llm=ok backend=0
+[agent] Tool call: recover_task args={"action": "resume", "target": "buggy_app"}
+[tools] Executing tool: recover_task
+buggy_app: code bug active, FIFO count will never drain
+buggy_app: producing, heartbeat at /data/ai_agent/evidence/heartbeat.txt
+[recover] hotfix payload missing: /data/ai_agent/patches/buggy_app_fixed
+[recover] verdict {"level":2,"action":"restart","target":"buggy_app","pre_delta":0,"post_delta":-1,"result":"needs_human"}
+[agent] Tool recover_task result: 104 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8300 bytes, alloc_fail=1 +1)
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 1 (backoff 0)
+[agent] LLM call failed (iter 6)
+[trace:6aefcdbc2746feb7] iter=6 tool=(none) latency=0ms llm=fail backend=0
+[recover] fallback report written (480/480 bytes)
+[trace:6aefcdbc2746feb7] END status=fail iters=7 tools=6 llm_ms=16870 elapsed=33s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[agent] Low memory: 13952 bytes free, skipping
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 系统内存不足，请稍后再试。
+[heartbeat] Triggered agent check

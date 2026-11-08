@@ -1,0 +1,39 @@
+
+===== session 2026-11-08 05:19:49 reset=False =====
+
+nsh> [K
+[05:19:50] CMD uname -a
+uname -a
+NuttX  0.0.0 dd92bcf4257-dirty Nov  8 2026 01:29:13 risc-v contest2026_330_board
+nsh> [K
+[05:19:53] CMD free
+free
+      total       used       free    maxused    maxfree  nused  nfree name
+     364784      82520     282264      82880     280200     97     39 Umem
+nsh> [K
+[05:19:56] CMD ls /data
+ls /data
+nsh: ls: stat failed: No such file or directory
+nsh> [K
+[05:20:00] SESSION OK
+
+===== session 2026-11-08 05:22:15 reset=False =====
+
+nsh> [K
+[05:22:15] CMD ls /
+ls /
+/:
+ dev/
+ proc/
+ tmp/
+nsh> [K
+[05:22:19] SESSION OK
+
+===== session 2026-11-08 05:22:20 reset=False =====
+
+nsh> [K
+[05:22:20] CMD ls /data
+ls /data
+nsh: ls: stat failed: No such file or directory
+nsh> [K
+[05:22:23] SESSION OK

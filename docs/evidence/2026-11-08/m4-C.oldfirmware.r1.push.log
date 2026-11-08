@@ -1,0 +1,4 @@
+attempt 1 rc=0
+pushing /home/w/Project/openvela/apps/bin/buggy_app_fixed: 6388 bytes, fnv1a=df9dc4f8
+fwpush: OK 6388 bytes, fnv1a=df9dc4f8 -> /data/ai_agent/patches/buggy_app_fixed
+

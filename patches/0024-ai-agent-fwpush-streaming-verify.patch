@@ -1,0 +1,159 @@
+diff --git a/include/agent_config.h b/include/agent_config.h
+index e174a90..d8ac72b 100644
+--- a/include/agent_config.h
++++ b/include/agent_config.h
+@@ -98,6 +98,15 @@
+ #define AGENT_USER_FILE AGENT_DATA_DIR "/config/USER.md"
+ #define AGENT_CONFIG_FILE AGENT_DATA_DIR "/config/config.json"
+ 
++/* SiliconLoop M4: the L3 hotfix payload has ONE canonical path, derived
++ * from AGENT_DATA_DIR. fwpush (the CLI that writes it) and the recover
++ * tool (the code that execs it) must both reference this macro - a
++ * second hard-coded literal is how the first 0023 bug slipped through
++ * (fwpush wrote /data/patches while the loader read
++ * /data/ai_agent/patches). */
++#define AGENT_PATCHES_DIR AGENT_DATA_DIR "/patches"
++#define AGENT_HOTFIX_ELF_PATH AGENT_PATCHES_DIR "/buggy_app_fixed"
++
+ /* ── Feishu (Lark) Bot ──────────────────────────────────────── */
+ #define AGENT_FEISHU_POLL_STACK (20 * 1024) /* WS client needs more stack \
+                                                 */
+diff --git a/src/channels/nsh_commands.c b/src/channels/nsh_commands.c
+index af1ccb8..63e2977 100644
+--- a/src/channels/nsh_commands.c
++++ b/src/channels/nsh_commands.c
+@@ -316,17 +316,22 @@ static void cmd_heap_info(void)
+         mi.arena, mi.fordblks, mi.uordblks);
+ }
+ 
+-/* ── SiliconLoop M4: fwpush - serial hotfix payload transfer ──────── */
++/* SiliconLoop M4: fwpush - serial hotfix payload transfer ──────── */
+ 
+-#define FWPUSH_PATH     "/data/patches/buggy_app_fixed"
++#define FWPUSH_PATH     AGENT_HOTFIX_ELF_PATH
+ #define FWPUSH_MAX      (16 * 1024)
+ #define FWPUSH_CHUNK    512      /* base64 chars per decoded chunk */
+ 
+-static unsigned int fwpush_fnv1a(const unsigned char *data, size_t len)
++static unsigned int fwpush_fnv1a_upd(unsigned int h,
++    const unsigned char *data, size_t len)
+ {
+-    /* FNV-1a 32-bit: guards transport bit errors only (not tampering;
+-     * payload signatures are a post-defense item). */
+-    unsigned int h = 2166136261u;
++    /* FNV-1a 32-bit, incremental form: guards transport bit errors only
++     * (not tampering; payload signatures are a post-defense item). The
++     * whole-buffer variant was dropped when the readback went streaming
++     * - a 16KB static readback buffer pushed the boot heap below the
++     * mbedtls X509 handshake need and every LLM round failed with
++     * buggy_app running (2026-11-08 board test, ssl_handshake
++     * ret=-0x2880). */
+     for (size_t i = 0; i < len; i++) {
+         h ^= data[i];
+         h *= 16777619u;
+@@ -399,8 +404,8 @@ static void cmd_fwpush(int argc, char** argv)
+     }
+ 
+     mkdir("/data", 0755);
+-    mkdir("/data/ai_agent", 0755);
+-    mkdir("/data/patches", 0755);
++    mkdir(AGENT_DATA_DIR, 0755);
++    mkdir(AGENT_PATCHES_DIR, 0755);
+ 
+     FILE *f = fopen(FWPUSH_PATH, "w");
+     if (!f) {
+@@ -409,6 +414,14 @@ static void cmd_fwpush(int argc, char** argv)
+     }
+ 
+     unsigned long got = 0;
++    /* SiliconLoop: FNV over the bytes AS THEY ARE WRITTEN - a whole-
++     * payload readback buffer (16KB static) pushed the agent's boot
++     * free heap below the mbedtls X509 handshake allocation and every
++     * LLM round failed with buggy_app running (2026-11-08 board test).
++     * Verification is still independent: re-read the file in small
++     * chunks and hash the STREAMED bytes, so what is checked is what
++     * was stored without ever holding the payload in RAM. */
++    unsigned int wr_sum = 2166136261u;
+     while (got < total) {
+         if (!fgets(line, sizeof(line), stdin)) {
+             printf("fwpush: input ended early (%lu/%lu)\n", got, total);
+@@ -426,6 +439,7 @@ static void cmd_fwpush(int argc, char** argv)
+             printf("fwpush: write failed (errno=%d)\n", errno);
+             goto fail;
+         }
++        wr_sum = fwpush_fnv1a_upd(wr_sum, buf, (size_t)n);
+         got += (unsigned long)n;
+     }
+     fclose(f);
+@@ -436,22 +450,29 @@ static void cmd_fwpush(int argc, char** argv)
+         goto fail_noclose;
+     }
+ 
+-    /* Verify by reading back: what was checked is what was stored. */
++    /* Verify by reading back in small chunks: what was checked is what
++     * was stored. The written-sum (wr_sum) must equal the declared one
++     * AND the streamed readback must equal it again. */
+     {
+-        static unsigned char rb[FWPUSH_MAX];
+         f = fopen(FWPUSH_PATH, "r");
+         if (!f) {
+             printf("fwpush: reopen failed\n");
+             goto fail_noclose;
+         }
+-        size_t rlen = fread(rb, 1, sizeof(rb), f);
++        unsigned int rd_sum = 2166136261u;
++        size_t rlen = 0;
++        size_t r;
++        while ((r = fread(buf, 1, sizeof(buf), f)) > 0) {
++            rd_sum = fwpush_fnv1a_upd(rd_sum, buf, r);
++            rlen += r;
++        }
+         fclose(f);
+         f = NULL;
+         if (rlen != total
+-            || fwpush_fnv1a(rb, rlen) != want_sum) {
++            || rd_sum != want_sum || wr_sum != rd_sum) {
+             printf("fwpush: CHECKSUM MISMATCH rlen=%zu sum=%08x "
+                 "want=%08x - payload deleted\n",
+-                rlen, fwpush_fnv1a(rb, rlen), want_sum);
++                rlen, rd_sum, want_sum);
+             goto fail_noclose;
+         }
+         printf("fwpush: OK %lu bytes, fnv1a=%08x -> %s\n", got, want_sum,
+diff --git a/src/tools/tool_recover.c b/src/tools/tool_recover.c
+index 5927807..aaed0d5 100644
+--- a/src/tools/tool_recover.c
++++ b/src/tools/tool_recover.c
+@@ -72,7 +72,7 @@ static const char *TAG = "recover";
+ #define ACTIONS_LOG     EVID_DIR "/actions.log"
+ #define NEEDS_HUMAN     EVID_DIR "/needs_human"
+ 
+-#define RUN_ELF_PATH    "/data/ai_agent/bin/buggy_app"
++#define RUN_ELF_PATH    AGENT_DATA_DIR "/bin/buggy_app"
+ 
+ #ifndef COOLDOWN_S
+ #define COOLDOWN_S      120   /* one heartbeat period */
+@@ -170,12 +170,12 @@ static void fb_render(const char *target, int level, const char *action,
+             "task instance was replaced";
+     } else if (strcmp(result, "recovered") == 0 && level == 3) {
+         conclusion = "recovered after the L3 (hotfix) rung: the faulty "
+-            "build was replaced by the fixed ELF from /data/patches";
++            "build was replaced by the fixed ELF from " AGENT_PATCHES_DIR;
+     } else if (level >= 3) {
+         /* rule: fault present even after L3 = the hotfix did not hold */
+         conclusion = "the fault persisted through the L1/L2/L3 ladder "
+             "(incl. the hotfix rung): the fixed ELF must be inspected; "
+-            "a human needs to review /data/patches/buggy_app_fixed";
++            "a human needs to review " AGENT_HOTFIX_ELF_PATH;
+     } else if (level == 2 && strcmp(result, "needs_human") == 0) {
+         /* rule: ladder exhausted below/at L2 without hotfix executing */
+         conclusion = "the fault persisted through the L1/L2 ladder "
+@@ -338,7 +338,7 @@ static int verify_pid_target(pid_t pid)
+ /* Payload location. /data is tmpfs on this board: the payload is pushed
+  * per-session by the operator (fwpush) and does not survive reboot;
+  * Flash persistence is a post-defense roadmap item (SmartFS). */
+-#define HOTFIX_ELF_PATH AGENT_DATA_DIR "/patches/buggy_app_fixed"
++#define HOTFIX_ELF_PATH AGENT_HOTFIX_ELF_PATH
+ /* Refuse absurd payloads early; the real one is ~5 KB. */
+ #define HOTFIX_MAX_BYTES (16 * 1024)
+ 

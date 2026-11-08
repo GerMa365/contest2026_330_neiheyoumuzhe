@@ -1,0 +1,148 @@
+
+===== session 2026-11-08 07:41:23 reset=False =====
+
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:69a2c67835c3b13a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275320
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 2 (backoff 2)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:69a2c67835c3b13a] iter=0 tool=(none) latency=60ms llm=fail backend=0
+[trace:69a2c67835c3b13a] END status=fail iters=1 tools=0 llm_ms=60 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:69a2c6f07c9701b3] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275440
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在分析...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 3 (backoff 4)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:69a2c6f07c9701b3] iter=0 tool=(none) latency=60ms llm=fail backend=0
+[trace:69a2c6f07c9701b3] END status=fail iters=1 tools=0 llm_ms=60 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:69a2c76803cd357a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275560
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed (iter 0)
+[trace:69a2c76803cd357a] iter=0 tool=(none) latency=50ms llm=fail backend=-1
+[trace:69a2c76803cd357a] END status=fail iters=1 tools=0 llm_ms=50 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:69a2c7e02746feb7] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275680
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在思考中...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed (iter 0)
+[trace:69a2c7e02746feb7] iter=0 tool=(none) latency=60ms llm=fail backend=-1
+[trace:69a2c7e02746feb7] END status=fail iters=1 tools=0 llm_ms=60 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] Auto-recovering backend 0 after 300s
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:69a2c8580830f44a] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275800
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 正在分析...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 1 (backoff 0)
+[agent] LLM call failed (iter 0)
+[trace:69a2c8580830f44a] iter=0 tool=(none) latency=60ms llm=fail backend=0
+[trace:69a2c8580830f44a] END status=fail iters=1 tools=0 llm_ms=60 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:69a2c8d073b6c3ea] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772275920
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 2 (backoff 2)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:69a2c8d073b6c3ea] iter=0 tool=(none) latency=70ms llm=fail backend=0
+[trace:69a2c8d073b6c3ea] END status=fail iters=1 tools=0 llm_ms=70 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:69a2c94876c64bb0] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772276040
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 稍等，处理中...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed on backend 0, trying failover
+[llm_router] Backend 0 failure count: 3 (backoff 4)
+[llm_router] All backends backed off, using fallback 0
+[agent] LLM call failed (iter 0)
+[trace:69a2c94876c64bb0] iter=0 tool=(none) latency=60ms llm=fail backend=0
+[trace:69a2c94876c64bb0] END status=fail iters=1 tools=0 llm_ms=60 elapsed=0s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+[agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm_router] No available backend
+[trace:69a2c9c061ce8483] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1772276160
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] ssl_setup ret=0x7f00
+[agent] LLM call failed (iter 0)
+[trace:69a2c9c061ce8483] iter=0 tool=(none) latency=50ms llm=fail backend=-1
+[trace:69a2c9c061ce8483] END status=fail iters=1 tools=0 llm_ms=50 elapsed=0s backend=-1
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: Sorry, I encountered an error.
+
+[07:56:24] SESSION OK

@@ -1,0 +1,19 @@
+
+===== session 2026-11-08 06:37:32 reset=False =====
+[K
+nsh> [K
+nsh> [K
+nsh> [K
+nsh> [KNuttShe
+nsh: NuttShe: command not found
+nsh> [K
+[06:37:33] CMD uname -a
+uname -a
+NuttX  0.0.0 dd92bcf4257-dirty Nov  8 2026 06:13:13 risc-v contest2026_330_board
+nsh> [K
+[06:37:36] CMD free
+free
+      total       used       free    maxused    maxfree  nused  nfree name
+     364784      82520     282264      82880     280200     97     39 Umem
+nsh> [K
+[06:37:39] SESSION OK

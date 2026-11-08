@@ -1,6 +1,6 @@
 # 补丁总索引
 
-22 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
+23 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
 根因、解法、局限与验证记录见下文对应小节。
 
 | 补丁 | 目标仓库 | 内容 |
@@ -27,9 +27,11 @@
 | 0021 | `packages/ai_agent` | 保底报告（收尾 LLM 失败时由 C 代码写 report.md） |
 | 0022 | `packages/ai_agent` | L3 ELF 热修复（exec_spawn + 符号表 + 阶梯第 3 级） |
 | 0023 | `packages/ai_agent` | fwpush 串口下发 CLI（修复包经校验落盘 /data/patches） |
+| 0024 | `packages/ai_agent` | 路径宏统一 + fwpush 流式校验（删 16KB 静态回读缓冲） |
 
 0001–0014 为九月阶段（初赛），0015–0021 为决赛新增的闭环功能，
-0022–0023 为 M4（L3 热修复）新增（2026-11-08）。
+0022–0023 为 M4（L3 热修复）新增（2026-11-08），0024 为板测当日
+修复的收口（2026-11-08）。
 
 ---
 
@@ -1103,3 +1105,81 @@ FNV-1a-32**（板端与主机各算一遍），校验一致才把文件留在
 
 - 干净副本链上 `git apply` 通过、与工作树一致（2026-11-08）。
 - 板上：smoke 测试正常包过验、截断/篡改包被拒（验收表第 1 项，待跑）。
+
+# 0024-ai-agent-fwpush-streaming-verify.patch
+
+## 性质：缺陷修复 + 一致性修正，增量补丁
+
+0022/0023 的续篇（应用顺序 0007 → … → 0023 → 0024）。2026-11-08 板测
+当日发现并修复的两处问题的收口，只改 `packages/ai_agent` 三个文件：
+`include/agent_config.h`、`src/channels/nsh_commands.c`、
+`src/tools/tool_recover.c`。
+
+## 目标仓库
+
+`packages/ai_agent/`
+
+## 基线提交
+
+0023 应用后的树（0007 → … → 0023 全链 `git apply` 干净副本）。
+
+## 解决的问题
+
+两处，同一块板测里先后暴露：
+
+**① 修复包路径双写（一致性）。** 0022 的 `tool_recover.c` 与 0023 的
+`fwpush` 各自硬编码 payload 路径，首次板测时两处字面量不一致
+（fwpush 写 `/data/patches/`，L3 加载读 `/data/ai_agent/patches/`），
+修复包落在了加载路径之外，L3 找不到 payload。本补丁在
+`agent_config.h` 新增唯一的规范路径宏
+`AGENT_PATCHES_DIR` / `AGENT_HOTFIX_ELF_PATH`（从 `AGENT_DATA_DIR`
+派生），fwpush（0023 的 `FWPUSH_PATH`）与 recover 工具（0022 的
+`HOTFIX_ELF_PATH`、保底报告文案、`RUN_ELF_PATH`）全部改为引用宏。
+host 测试 stub 的同名宏同步已在参赛仓库 tools/host-test 中提交。
+
+**② fwpush 的 16KB 静态回读缓冲（内存回归根因）。** 0023 落盘前
+用 `static unsigned char rb[16*1024]` 整包回读校验。这块缓冲（符号
+`rb.0`，System.map 实证 4ff533f0 起 0x4000）使 agent 启动后 free heap
+降到 120,280 B，mbedtls X509 证书解析需要的大块连续内存分配失败，
+`ssl_handshake ret=-0x2880`，**全部场景**每一轮 LLM 请求在握手即死
+（buggy_app 运行时堆更紧）。本补丁删除整包缓冲：写入时流式累计
+FNV（`fwpush_fnv1a_upd`），校验改为 512B 分块重读、流式比对
+（`wr_sum` 与 `rd_sum` 与声明值三方一致才放行）——"校验所存即所发"
+语义不变，payload 不再整包驻留 RAM。实测恢复 16.4KB
+（120,280 → 136,664）。
+
+## 根因
+
+①是低级的一致性缺陷：路径字面量出现在两处而没有任何编译期手段
+强制一致；②是"校验逻辑为省事把整个文件拉进内存"的写法与本项目的
+404KB 堆、瓶颈在最大连续块的约束冲突——16KB 静态分配看似无害
+（远小于 404KB），实际把 boot 时的最大连续块压到 X509 解析的需求
+之下。
+
+## 解法
+
+见上。附带说明：`FWPUSH_MAX`（16KB 总量上限）保留不动，它是协议
+限制不是内存分配；`fwpush_fnv1a`（整包变体）删除，只留增量变体。
+
+## 局限
+
+- 流式校验比整包回读多一次文件 I/O（512B 分块），~6.4KB payload
+  增加约 13 次读循环，传输耗时影响可忽略。
+- 长跑堆见底状态下（free≈11.6KB）fwpush 写 tmpfs 曾报
+  `write failed (errno=12)`（tmpfs 页分配与 LLM 轮峰值争堆）；
+  验收流程在 boot 后 20s 内 push，不触碰该窗口。该现象属于整体
+  内存水位问题，由内存压缩方案处理，本补丁不解决。
+
+## 验证记录
+
+- 干净副本全链 0007 → … → 0023 → 0024 `git apply --check` 通过，
+  应用后三文件与工作树逐字节一致（2026-11-08）。
+- 板上（烧录 #3 固件，2026-11-08）：fwpush 正例
+  （`OK 6388 bytes, fnv1a=df9dc4f8` → L3 加载路径）、负例① 截断
+  （size mismatch + unlink）、负例② 坏校验和（CHECKSUM MISMATCH +
+  unlink）三例全部通过；agent 启动 free heap 136,664（旧版 120,280）。
+  证据：docs/evidence/2026-11-08/m4-smoke-notes.md、m4-smoke2-push-*.log、
+  m4-C.r1.setup。
+- 板测同时确认：本补丁删掉的 16.4KB 不足以补齐 M4 对 M3 的全部内存
+  回归（M3 同场景 140,800–141,000），剩余差距由 M4 新增驻留数据
+  构成，分析见 docs/m4-memory-analysis.md（批次 B 产出）。

@@ -16,6 +16,7 @@
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -161,6 +162,12 @@ def main():
                          "(needs_human) - the M3 acceptance gate, kept "
                          "reproducible. m4: pass requires an L3 hotfix "
                          "recovery verdict (level:3 + result:recovered).")
+    ap.add_argument("--push-hotfix", action="store_true",
+                    help="M4 scenario C: push the fixed ELF into "
+                         "/data/patches BEFORE the diagnosis window. "
+                         "/data is tmpfs and every round resets the "
+                         "board, so the payload must be re-pushed per "
+                         "round or L3 finds no payload and escalates.")
     args = ap.parse_args()
 
     inject = {"A": "buggy_app &", "B": "buggy_app stall &", "C": "buggy_app bug &"}[args.scenario]
@@ -176,11 +183,52 @@ def main():
         # ("Pool slot 0 still in use at shutdown"), so heap degrades across
         # in-place restarts (r2 free heap 47KB -> ssl_setup 0x7f00). A board
         # reset per round is also what M0's HIL acceptance demands.
-        rc, out = run_session(lf, reset=True, duration=window,
-                              cmds=[inject, "ai_agent"])
+        # M4 (--push-hotfix): /data is tmpfs and every round starts with
+        # a board reset, so the hotfix payload must be pushed AFTER the
+        # reset and ai_agent start, BEFORE the diagnosis window opens.
+        # Order inside a round:
+        #   reset -> inject + ai_agent (run_session, short) -> push
+        #   -> main observation window (run_session without reset).
+        # The push tool opens the serial port itself; its transcript
+        # lands in <log>.rN.push.log.
+        push_ok = False
+        push_log = []
+        if args.push_hotfix and args.scenario == "C":
+            rc0, _ = run_session(lf + ".setup", reset=True, duration=20,
+                                 cmds=[inject, "ai_agent"])
+            # The transfer races NSH for console stdin (two readers on
+            # the same UART; a line can land in the wrong shell). The
+            # board unlinks the payload on any failure, so retrying the
+            # whole push is safe and each attempt re-syncs the prompt.
+            for attempt in range(1, 4):
+                push = subprocess.run(
+                    [sys.executable, HERE + "/push_hotfix.py"],
+                    capture_output=True, text=True, timeout=300)
+                push_log.append(
+                    f"attempt {attempt} rc={push.returncode}\n"
+                    f"{push.stdout}\n{push.stderr}")
+                if push.returncode == 0:
+                    push_ok = True
+                    break
+            with open(f"{lf}.push.log", "w") as pf:
+                pf.write("\n".join(push_log))
+            print(f"[push_hotfix ok={push_ok}] "
+                  f"{push.stdout.strip()[-120:]}", flush=True)
+
+        rc, out = run_session(lf, reset=not (args.push_hotfix
+                                             and args.scenario == "C"),
+                              duration=window,
+                              cmds=[] if (args.push_hotfix
+                                          and args.scenario == "C")
+                              else [inject, "ai_agent"])
         verdict = parse_log(lf)
         verdict.update(round=n, scenario=args.scenario, session_rc=rc)
-        if args.scenario == "A":
+        if args.scenario == "C" and args.judge == "m4" and not push_ok:
+            # the payload never landed - L3 would fail on an empty
+            # /data/patches, so this round cannot test the hotfix rung
+            verdict["pass"] = False
+            verdict["cause"] = "push_failed"
+        elif args.scenario == "A":
             # M1 acceptance: a serialization OOM anywhere in the session
             # fails the round even if the last heartbeat trace recovered.
             # (stalled_verdict is reported but not a pass gate: a stall

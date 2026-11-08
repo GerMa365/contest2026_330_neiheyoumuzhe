@@ -17,6 +17,7 @@
 
 import argparse
 import base64
+import serial
 import sys
 import time
 
@@ -70,7 +71,9 @@ def main():
     print(f"pushing {elf}: {len(data)} bytes, fnv1a={checksum:08x}")
 
     port = serial_run.locate_port() if args.port == "auto" else args.port
-    ser = serial_run.open_port(port)
+    # SiliconLoop: serial_run.open_port(timeout) takes a TIMEOUT, not a
+    # port name - open the device directly here (console is at 115200).
+    ser = serial.Serial(port, 115200, timeout=0.3)
     if ser is None:
         print(f"ERROR: cannot open {port}", file=sys.stderr)
         return 2
@@ -93,15 +96,134 @@ def main():
         send("quit\r")
         drain(1.0)
 
-    # start the transfer
-    send(f"fwpush {len(data)} {checksum:08x}\r")
+    # SiliconLoop: fwpush lives in ai_agent's vela> CLI, and BOTH shells
+    # (nsh and agent_cli) read the same UART - whichever task wins the
+    # stdin race gets the line (seen 06:43: every base64 chunk answered
+    # "command not found" by nsh). So: make sure ai_agent is running,
+    # then hand it a line and wait until it answers from the vela> side
+    # before streaming the payload.
+    # Long first drain: a fresh boot keeps printing for seconds, and a
+    # too-short probe made us start a SECOND agent instance (rc=-1 on
+    # nsh_commands_start, seen 06:47).
+    boot = b""
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        chunk = ser.read(4096)
+        if chunk:
+            boot += chunk
+            deadline = time.time() + 1.5
+    boot = boot.decode(errors="replace")
+    agent_running = ("[agent]" in boot or "vela>" in boot
+                     or "[heartbeat]" in boot)
+    if "vela>" not in boot:
+        if not agent_running:
+            # ai_agent not running at all - start it (foreground so its
+            # CLI thread owns stdin) and wait for the vela> prompt.
+            send("ai_agent\r")
+        # Either way, wait for the CLI to answer: a heartbeat round in
+        # flight can hold the console for tens of seconds; the prompt
+        # only prints when the CLI thread gets its turn.
+        deadline = time.time() + 90
+        acc = boot
+        while time.time() < deadline:
+            acc += drain(1.0)
+            if "vela>" in acc:
+                break
+        else:
+            print("ERROR: no vela> prompt after starting ai_agent; "
+                  "board said:", file=sys.stderr)
+            print(acc[-800:], file=sys.stderr)
+            return 2
+
+    # prompt sync: an empty line must bounce back a fresh "vela>" from
+    # the agent CLI (proves the CLI owns stdin right now)
+    for _ in range(5):
+        send("\r")
+        if "vela>" in drain(1.0):
+            break
+    else:
+        print("ERROR: vela> prompt never re-answered; aborting",
+              file=sys.stderr)
+        return 2
+
+    # probe: a bare "fwpush" must return the usage line FROM THE VELA
+    # CLI. If nsh answered instead ("command not found"), the header we
+    # send next would be eaten by the wrong shell (seen 07:00: every
+    # chunk answered "Unknown command" because nsh took the header).
+    probe_tries = 5
+    for _ in range(probe_tries):
+        send("fwpush\r")
+        r = drain(1.0)
+        if "usage: fwpush" in r:
+            break
+        if "vela>" not in r:
+            send("\r")
+            drain(0.8)
+    else:
+        print("ERROR: fwpush probe failed (vela CLI does not own "
+              "stdin)", file=sys.stderr)
+        return 2
+
+    # SiliconLoop: use \n line endings (the \r-only variant lost lines
+    # mid-stream once the transfer started, seen 06:50-06:55); drain
+    # DURING streaming so a mid-transfer board verdict is seen in the
+    # right order and the UART echo cannot back up.
+    #
+    # SiliconLoop: do NOT push while a heartbeat LLM round is running.
+    # The agent round holds the console busy for 10-90s; the vela CLI
+    # stops draining the 256B UART RX ring, bytes drop mid-chunk and
+    # the board answers "fwpush: bad chunk (n=-1, ...)" (seen 07:0x:
+    # got=2904 / 3768 at different offsets, always during a round).
+    # Wait for the console to go quiet (no LLM activity for 8s) first;
+    # scenario.py's 3-attempt retry covers a round that fires anyway.
+    quiet_deadline = time.time() + 150
+    while time.time() < quiet_deadline:
+        r = drain(2.0)
+        if "[llm] OpenAI API" in r or "[trace" in r and "BEGIN" in r:
+            continue            # a round is in flight; keep waiting
+        if "[trace" in r and "END status=" in r:
+            break               # round just finished; quiet window now
+        # no activity in this window - quiet enough to start
+        if r.strip() == "" or "vela>" in r:
+            break
+    else:
+        print("ERROR: console never went quiet (heartbeat rounds keep "
+              "firing); aborting", file=sys.stderr)
+        return 2
+
+    send(f"fwpush {len(data)} {checksum:08x}\n")
     resp = drain(0.5)
+    if "Unknown command" in resp or "nsh:" in resp:
+        print("ERROR: header eaten by the wrong shell; board said:",
+              file=sys.stderr)
+        print(resp[-400:], file=sys.stderr)
+        return 1
 
     b64 = base64.b64encode(data).decode()
+    aborted = False
     for i in range(0, len(b64), args.chunk):
-        send(b64[i:i + args.chunk] + "\r", wait=args.pace)
-    send("fwpush_end\r")
-    resp += drain(2.0)
+        send(b64[i:i + args.chunk] + "\n", wait=args.pace)
+        r = drain(0.1)
+        # a board verdict mid-stream means the transfer already ended
+        # (bad chunk / checksum) - stop streaming, capture the verdict
+        if "fwpush:" in r:
+            resp += r
+            aborted = True
+            break
+        # nsh ate this chunk (dispatch rejection noise) - abort; the
+        # board will fail the transfer and unlink, caller retries
+        if "Unknown command: " + b64[i:i + args.chunk] in r \
+                or "command not found" in r:
+            resp += r
+            aborted = True
+            break
+        resp += r
+    if not aborted:
+        send("fwpush_end\n")
+        resp += drain(4.0)
+    else:
+        # flush whatever the board still prints for this transfer
+        resp += drain(2.0)
 
     if "fwpush: OK" in resp:
         ok_line = [l for l in resp.splitlines() if "fwpush: OK" in l][-1]
