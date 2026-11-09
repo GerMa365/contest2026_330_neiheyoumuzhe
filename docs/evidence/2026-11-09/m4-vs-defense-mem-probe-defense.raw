@@ -1,0 +1,964 @@
+
+===== def-r1 =====
+ll (NSH)
+nsh> [K
+nsh> [K
+nsh> [K
+nsh> [K
+nsh> [KESP-ROM:esp32p4-eco7-20260109
+Build:Jan  9 2026
+rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x30100000,len:0x88
+load:0x4ff40000,len:0xb284
+SHA-256 comparison failed:
+Calculated: 1a0b6bcc4736c9c4c188e82fa8919d28238b16b16f13d667cf8ae076320960d7
+Expected: 00000000d02c0000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+entry 0x4ff49060
+*** Booting NuttX ***
+tcm: lma 0x00002020 vma 0x30100000 len 0x88     (136)
+dram: lma 0x000020b0 vma 0x4ff40000 len 0xb284   (45700)
+padd: lma 0x0000d348 vma 0x00000000 len 0x2cd0   (11472)
+imap: lma 0x00010020 vma 0x40090020 len 0x31d44  (204100)
+padd: lma 0x00041d6c vma 0x00000000 len 0xe28c   (57996)
+imap: lma 0x00050000 vma 0x40000000 len 0x8f568  (587112)
+total segments stored 6
+PMPCFG 9d9d9b9b 808f8d80 00008f8d 00000000
+PMP00 cfg=9b addr=09ffffff
+PMP01 cfg=9b addr=0ffc3fff
+PMP02 cfg=9d addr=13f03fff
+PMP03 cfg=9d addr=23f03fff
+PMP04 cfg=80 addr=13fc0000
+PMP05 cfg=8d addr=13fd2540
+PMP06 cfg=8f addr=13ff0000
+PMP07 cfg=80 addr=23fc0000
+PMP08 cfg=8d addr=23fd2540
+PMP09 cfg=8f addr=23ff0000
+PMP10 cfg=00 addr=00000000
+PMP11 cfg=00 addr=00000000
+PMP12 cfg=00 addr=00000000
+PMP13 cfg=00 addr=00000000
+PMP14 cfg=00 addr=00000000
+PMP15 cfg=00 addr=00000000
+
+NuttShell (NSH)
+nsh> [Kbuggy_app &
+buggy_app [5:100]
+nsh> [Kai_agent
+I Agent starting (build: 2026-11-05 22:34:36)
+[agent] [boot +0ms] P0: timezone set
+[agent] Mounting /data as tmpfs for simulation...
+[agent] [boot +0ms] P0: storage ready
+[agent] [boot +0ms] heap: arena=384160 free=261936 used=122224
+[cfgstore] Config store ready at /data/ai_agent/config/config.json
+[agent] [boot +0ms] P1: config_store_init (rc=0)
+[bus] Message bus initialized (depth 16)
+[agent] [boot +0ms] P1: message_bus_init (rc=0)
+[memory] Initializing memory store at /data/ai_agent
+[memory] Created file: /data/ai_agent/config/SOUL.md
+[memory] Created file: /data/ai_agent/config/USER.md
+[memory] Created file: /data/ai_agent/memory/MEMORY.md
+[memory] Created file: /data/ai_agent/HEARTBEAT.md
+[memory] Created file: /data/ai_agent/cron.json
+[memory] Created directory: /data/ai_agent/memory/daily
+[memory] Memory store initialized successfully
+[agent] [boot +10ms] P1: memory_store_init (rc=0)
+[session] Session manager initialized at /data/ai_agent/sessions
+[agent] [boot +10ms] P1: session_mgr_init (rc=0)
+[proxy] Loading proxy config...
+[proxy] No proxy (direct connection)
+[agent] [boot +10ms] P2: http_proxy_init (rc=0)
+[llm] LLM proxy initialized (model: mimo-v2.6-flash, host: )
+[agent] [boot +10ms] P3: llm_proxy_init (rc=0)
+[llm_router] Router initialized: 0 backends, profile=0
+[agent] [boot +10ms] P3: llm_router_init (rc=0)
+[llm_router] Backend 0 configured: token-plan-cn.xiaomimimo.com
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+LLM backend: token-plan-cn.xiaomimimo.com:443/v1/chat/completions (model: mimo-v2.6-flash) [router slot 0]
+buggy_app: producing, heartbeat at /data/ai_agent/evidence/heartAPI key saved.
+
+[web_search] No search key. Use: set_tavily_key / set_search_key
+[tools] Registered tool: web_search
+[tools] Registered tool: get_current_time
+[tools] Registered tool: read_file
+[tools] Registered tool: write_file
+[tools] Registered tool: edit_file
+[tools] Registered tool: list_dir
+[tools] Registered tool: cron_add
+[tools] Registered tool: cron_list
+[tools] Registered tool: cron_remove
+[tools] Registered tool: fetch_url
+[tools] Registered tool: run_shell
+[tools] Registered tool: recover_task
+[tools] Tools JSON built (12 builtin + 0 providers)
+[tools] Tool registry initialized
+[agent] [boot +30ms] P3: tool_registry_init (rc=0)
+[guard] Tool guard initialized (max_input=32768, rate_window=60s, rate_max=10)
+[agent] [boot +30ms] P3: tool_guard_init (rc=0)
+[skills] Initializing skills system
+[skills] Installed built-in skill: /data/ai_agent/skills/weather.md
+[skills] Installed built-in skill: /data/ai_agent/skills/daily-briefing.md
+[skills] Installed built-in skill: /data/ai_agent/skills/skill-creator.md
+[skills] Installed built-in skill: /data/ai_agent/skills/system-health.md
+[skills] Installed built-in skill: /data/ai_agent/skills/reminder.md
+[skills] Installed built-in skill: /data/ai_agent/skills/note-taker.md
+[skills] Installed built-in skill: /data/ai_agent/skills/translate.md
+[skills] Installed built-in skill: /data/ai_agent/skills/news-digest.md
+[skills] Installed built-in skill: /data/ai_agent/skills/feishu-test.md
+[skills] Installed built-in skill: /data/ai_agent/skills/task-manager.md
+[skills] Installed built-in skill: /data/ai_agent/skills/self-diagnostic.md
+[skills] Skills system ready (11 built-in)
+[agent] [boot +40ms] P3: skill_loader_init (rc=0)
+[agent] Agent loop initialized
+[agent] [boot +40ms] P3: agent_loop_init (rc=0)
+[cron] Loaded 0 cron jobs
+[agent] [boot +40ms] P3: cron_service_init (rc=0)
+[heartbeat] Heartbeat service initialized (file: /data/ai_agent/HEARTBEAT.md, interval: 120s)
+[agent] [boot +40ms] P3: heartbeat_init (rc=0)
+[agent] [boot +40ms] P3: voice_channel_init (rc=0)
+NSH commands registered
+[agent] [boot +40ms] P4: nsh_commands_init (rc=0)
+[agent] [boot +40ms] P5: outbound dispatch thread started
+[cron] Cron started (0 jobs, interval 10s)
+[heartbeat] Heartbeat started (every 2 min)
+[agent] [boot +40ms] P5: cron + heartbeat started
+[agent] [boot +40ms] P5: network_watch thread started (async)
+[agent] [boot +50ms] P6: nsh_commands_start (rc=0)
+[agent] [boot +50ms] AI Agent ready. Type 'help' in NSH for commands.
+beat.txt
+[agent] Outbound dispatch started
+[agent] Network watcher started
+[netmgr] No saved WiFi credentials. Use CLI: set_wifi <ssid> <pass>
+[netmgr] Found iface eth0 addr 192.168.3.200
+[netmgr] Network connected: 192.168.3.200
+[netmgr] Found iface eth0 addr 192.168.3.200
+[agent] Network connected: 192.168.3.200
+[agent] Agent loop started, free heap: 137840
+[agent] Buffers: ctx=8192 hist=8192 tool=8192
+[agent] Tool output pool: 1 x 16384 bytes
+[agent] Tools JSON loaded: 4177 bytes
+[ws] WebSocket seed on port 28789
+[agent] All network services started!
+[cli] NSH CLI started. Type 'help' for commands.
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:0000007a00000000] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=122
+[vela_tls] Clock too old, forcing to 2026
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Clock synced from HTTP Date: 1794191821
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:0000007a00000000] iter=0 tool=read_file latency=3380ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTBEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9377 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:0000007a00000000] iter=1 tool=read_file latency=3870ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9903 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:0000007a00000000] iter=2 tool=run_shell latency=1870ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10729 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:0000007a00000000] iter=3 tool=run_shell latency=1990ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11302 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:0000007a00000000] iter=4 tool=read_file latency=3030ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11789 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 97 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=97, tool_use=1, calls=1
+[agent] Tool iter 6: 1 calls
+[trace:0000007a00000000] iter=5 tool=write_file latency=89030ms llm=ok backend=0
+[agent] Tool call: write_file args={"path": "/data/ai_agent/evidence/report.md", "content": "# Embedded Self-Diagnostic Report\n\n## Observed Evidence\n- heartbeat.txt 初读: **4300**；ps 显示 ai_agent/buggy_app 等进程存活；free 显示 Umem total=384160, used=369384, free=14776；heartbeat.txt 复读: **4500**。\n- 心跳增量 Δ = 4500 − 4300 = **+200**。\n\n## Hypothesis\n心跳计数器在两次读取之间持续递增，说明 buggy_app 的心跳线程正在正常运行，未发生停滞；无需要恢复的异
+[tools] Executing tool: write_file
+[tool_files] write_file: /data/ai_agent/evidence/report.md (1052 bytes)
+[agent] Tool write_file result: 57 bytes
+[agent] Local tool shortcut: skip LLM round
+[trace:0000007a00000000] END status=ok iters=6 tools=6 llm_ms=103170 elapsed=1794191798s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: OK: wrote 1052 bytes to /data/ai_agent/evidence/report.md
+quit
+Exiting agent...
+thread exiting
+[agent] Outbound dispatch exiting
+[agent] Shutdown requested — stopping services...
+[ws] WebSocket server stopped
+[cron] Cron service stopping
+[heartbeat] Heartbeat stopped
+[bus] Message bus destroyed
+[agent] Shutdown complete.
+nsh> [Kfree
+      total       used       free    maxused    maxfree  nused  nfree name
+     384160     137208     246952     378328     110736    679     51 Umem
+nsh> [K
+===== def-r2 =====
+ESP-ROM:esp32p4-eco7-20260109
+Build:Jan  9 2026
+rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x30100000,len:0x88
+load:0x4ff40000,len:0xb284
+SHA-256 comparison failed:
+Calculated: 1a0b6bcc4736c9c4c188e82fa8919d28238b16b16f13d667cf8ae076320960d7
+Expected: 00000000d02c0000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+entry 0x4ff49060
+*** Booting NuttX ***
+tcm: lma 0x00002020 vma 0x30100000 len 0x88     (136)
+dram: lma 0x000020b0 vma 0x4ff40000 len 0xb284   (45700)
+padd: lma 0x0000d348 vma 0x00000000 len 0x2cd0   (11472)
+imap: lma 0x00010020 vma 0x40090020 len 0x31d44  (204100)
+padd: lma 0x00041d6c vma 0x00000000 len 0xe28c   (57996)
+imap: lma 0x00050000 vma 0x40000000 len 0x8f568  (587112)
+total segments stored 6
+PMPCFG 9d9d9b9b 808f8d80 00008f8d 00000000
+PMP00 cfg=9b addr=09ffffff
+PMP01 cfg=9b addr=0ffc3fff
+PMP02 cfg=9d addr=13f03fff
+PMP03 cfg=9d addr=23f03fff
+PMP04 cfg=80 addr=13fc0000
+PMP05 cfg=8d addr=13fd2540
+PMP06 cfg=8f addr=13ff0000
+PMP07 cfg=80 addr=23fc0000
+PMP08 cfg=8d addr=23fd2540
+PMP09 cfg=8f addr=23ff0000
+PMP10 cfg=00 addr=00000000
+PMP11 cfg=00 addr=00000000
+PMP12 cfg=00 addr=00000000
+PMP13 cfg=00 addr=00000000
+PMP14 cfg=00 addr=00000000
+PMP15 cfg=00 addr=00000000
+
+NuttShell (NSH)
+nsh> [Kbuggy_app &
+buggy_app [5:100]
+nsh> [Kbuggy_app: producing, heartbeat at /data/ai_agent/evidence/heartbeat.txt
+ai_agent
+agent] AI Agent - Vela AI Agent starting (build: 2026-11-05 22:34:36)
+[agent] [boot +10ms] P0: timezone set
+[agent] Mounting /data as tmpfs for simulation...
+[agent] [boot +10ms] P0: storage ready
+[agent] [boot +10ms] heap: arena=384160 free=259656 used=124504
+[cfgstore] Config store ready at /data/ai_agent/config/config.json
+[agent] [boot +10ms] P1: config_store_init (rc=0)
+[bus] Message bus initialized (depth 16)
+[agent] [boot +10ms] P1: message_bus_init (rc=0)
+[memory] Initializing memory store at /data/ai_agent
+[memory] Created file: /data/ai_agent/config/SOUL.md
+[memory] Created file: /data/ai_agent/config/USER.md
+[memory] Created file: /data/ai_agent/memory/MEMORY.md
+[memory] Created file: /data/ai_agent/HEARTBEAT.md
+[memory] Created file: /data/ai_agent/cron.json
+[memory] Created directory: /data/ai_agent/memory/daily
+[memory] Memory store initialized successfully
+[agent] [boot +10ms] P1: memory_store_init (rc=0)
+[session] Session manager initialized at /data/ai_agent/sessions
+[agent] [boot +20ms] P1: session_mgr_init (rc=0)
+[proxy] Loading proxy config...
+[proxy] No proxy (direct connection)
+[agent] [boot +20ms] P2: http_proxy_init (rc=0)
+[llm] LLM proxy initialized (model: mimo-v2.6-flash, host: )
+[agent] [boot +20ms] P3: llm_proxy_init (rc=0)
+[llm_router] Router initialized: 0 backends, profile=0
+[agent] [boot +20ms] P3: llm_router_init (rc=0)
+[llm_router] Backend 0 configured: token-plan-cn.xiaomimimo.com
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+LLM backend: token-plan-cn.xiaomimimo.com:443/v1/chat/completions (model: mimo-v2.6-flash) [router slot 0]
+API key saved.
+[web_search] No search key. Use: set_tavily_key / set_search_key
+[tools] Registered tool: web_search
+[tools] Registered tool: get_current_time
+[tools] Registered tool: read_file
+[tools] Registered tool: write_file
+[tools] Registered tool: edit_file
+[tools] Registered tool: list_dir
+[tools] Registered tool: cron_add
+[tools] Registered tool: cron_list
+[tools] Registered tool: cron_remove
+[tools] Registered tool: fetch_url
+[tools] Registered tool: run_shell
+[tools] Registered tool: recover_task
+[tools] Tools JSON built (12 builtin + 0 providers)
+[tools] Tool registry initialized
+[agent] [boot +30ms] P3: tool_registry_init (rc=0)
+[guard] Tool guard initialized (max_input=32768, rate_window=60s, rate_max=10)
+[agent] [boot +30ms] P3: tool_guard_init (rc=0)
+[skills] Initializing skills system
+[skills] Installed built-in skill: /data/ai_agent/skills/weather.md
+[skills] Installed built-in skill: /data/ai_agent/skills/daily-briefing.md
+[skills] Installed built-in skill: /data/ai_agent/skills/skill-creator.md
+[skills] Installed built-in skill: /data/ai_agent/skills/system-health.md
+[skills] Installed built-in skill: /data/ai_agent/skills/reminder.md
+[skills] Installed built-in skill: /data/ai_agent/skills/note-taker.md
+[skills] Installed built-in skill: /data/ai_agent/skills/translate.md
+[skills] Installed built-in skill: /data/ai_agent/skills/news-digest.md
+[skills] Installed built-in skill: /data/ai_agent/skills/feishu-test.md
+[skills] Installed built-in skill: /data/ai_agent/skills/task-manager.md
+[skills] Installed built-in skill: /data/ai_agent/skills/self-diagnostic.md
+[skills] Skills system ready (11 built-in)
+[agent] [boot +40ms] P3: skill_loader_init (rc=0)
+[agent] Agent loop initialized
+[agent] [boot +40ms] P3: agent_loop_init (rc=0)
+[cron] Loaded 0 cron jobs
+[agent] [boot +50ms] P3: cron_service_init (rc=0)
+[heartbeat] Heartbeat service initialized (file: /data/ai_agent/HEARTBEAT.md, interval: 120s)
+[agent] [boot +50ms] P3: heartbeat_init (rc=0)
+[agent] [boot +50ms] P3: voice_channel_init (rc=0)
+NSH commands registered
+[agent] [boot +50ms] P4: nsh_commands_init (rc=0)
+[agent] [boot +50ms] P5: outbound dispatch thread started
+[cron] Cron started (0 jobs, interval 10s)
+[heartbeat] Heartbeat started (every 2 min)
+[agent] [boot +50ms] P5: cron + heartbeat started
+[agent] [boot +50ms] P5: network_watch thread started (async)
+[agent] [boot +50ms] P6: nsh_commands_start (rc=0)
+[agent] [boot +50ms] AI Agent ready. Type 'help' in NSH for commands.
+[agent] Outbound dispatch started
+[agent] Network watcher started
+[netmgr] No saved WiFi credentials. Use CLI: set_wifi <ssid> <pass>
+[netmgr] Found iface eth0 addr 192.168.3.200
+[netmgr] Network connected: 192.168.3.200
+[netmgr] Found iface eth0 addr 192.168.3.200
+[agent] Network connected: 192.168.3.200
+[agent] Agent loop started, free heap: 139776
+[agent] Buffers: ctx=8192 hist=8192 tool=8192
+[agent] Tool output pool: 1 x 16384 bytes
+[agent] Tools JSON loaded: 4177 bytes
+[ws] WebSocket server started on port 28789
+[agent] All network services started!
+[cli] NSH CLI started. Type 'help' for commands.
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:0000007e00000000] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=126
+[vela_tls] Clock too old, forcing to 2026
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Clock synced from HTTP Date: 1794192252
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:0000007e00000000] iter=0 tool=read_file latency=84150ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTBEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9390 bytes, alloc_fail=0 +0)
+[vela_tls] Pooled connection stale, reconnecting
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794192327
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:0000007e00000000] iter=1 tool=read_file latency=6450ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10033 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:0000007e00000000] iter=2 tool=run_shell latency=2970ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11140 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:0000007e00000000] iter=3 tool=run_shell latency=5540ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11934 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:0000007e00000000] iter=4 tool=read_file latency=4480ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 12577 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 12 bytes text, 0 tool calls, finish=end_turn
+[agent] LLM resp: text=12, tool_use=0, calls=0
+[trace:0000007e00000000] iter=5 tool=(none) latency=2650ms llm=ok backend=0
+[trace:0000007e00000000] END status=ok iters=6 tools=5 llm_ms=106240 elapsed=1794192223s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: HEARTBEAT_OK
+quit
+Exiting agent...
+ad exiting
+[agent] Shutdown requested — stopping services...
+[ws] WebSocket server stopped
+[cron] Cron service stopping
+[heartbeat] Heartbeat stopped
+[agent] Outbound dispatch exiting
+[bus] Message bus destroyed
+[agent] Shutdown complete.
+nsh> [Kfree
+      total       used       free    maxused    maxfree  nused  nfree name
+     384160     135560     248600     379000     110736    676     50 Umem
+nsh> [K
+===== def-r3 =====
+ESP-ROM:esp32p4-eco7-20260109
+Build:Jan  9 2026
+rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x30100000,len:0x88
+load:0x4ff40000,len:0xb284
+SHA-256 comparison failed:
+Calculated: 1a0b6bcc4736c9c4c188e82fa8919d28238b16b16f13d667cf8ae076320960d7
+Expected: 00000000d02c0000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+entry 0x4ff49060
+*** Booting NuttX ***
+tcm: lma 0x00002020 vma 0x30100000 len 0x88     (136)
+dram: lma 0x000020b0 vma 0x4ff40000 len 0xb284   (45700)
+padd: lma 0x0000d348 vma 0x00000000 len 0x2cd0   (11472)
+imap: lma 0x00010020 vma 0x40090020 len 0x31d44  (204100)
+padd: lma 0x00041d6c vma 0x00000000 len 0xe28c   (57996)
+imap: lma 0x00050000 vma 0x40000000 len 0x8f568  (587112)
+total segments stored 6
+PMPCFG 9d9d9b9b 808f8d80 00008f8d 00000000
+PMP00 cfg=9b addr=09ffffff
+PMP01 cfg=9b addr=0ffc3fff
+PMP02 cfg=9d addr=13f03fff
+PMP03 cfg=9d addr=23f03fff
+PMP04 cfg=80 addr=13fc0000
+PMP05 cfg=8d addr=13fd2540
+PMP06 cfg=8f addr=13ff0000
+PMP07 cfg=80 addr=23fc0000
+PMP08 cfg=8d addr=23fd2540
+PMP09 cfg=8f addr=23ff0000
+PMP10 cfg=00 addr=00000000
+PMP11 cfg=00 addr=00000000
+PMP12 cfg=00 addr=00000000
+PMP13 cfg=00 addr=00000000
+PMP14 cfg=00 addr=00000000
+PMP15 cfg=00 addr=00000000
+
+NuttShell (NSH)
+nsh> [Kbuggy_app &
+buggy_app [5:100]
+nsh> [Kbuggy_app: producing, heartbeat at /data/ai_agent/evidence/heartbeat.txt
+ai_agent
+[agent] AI Agent - Vela AI Agent starting (build: 2026-11-05 22:34:36)
+[agent] [boot +0ms] P0: timezone set
+[agent] Mounting /data as tmpfs for simulation...
+[agent] [boot +0ms] P0: storage ready
+[agent] [boot +0ms] heap: arena=384160 free=259656 used=124504
+[cfgstore] Config store ready at /data/ai_agent/config/config.json
+[agent] [boot +10ms] P1: config_store_init (rc=0)
+[bus] Message bus initialized (depth 16)
+[agent] [boot +10ms] P1: message_bus_init (rc=0)
+[memory] Initializing memory store at /data/ai_agent
+[memory] Created file: /data/ai_agent/config/SOUL.md
+[memory] Created file: /data/ai_agent/config/USER.md
+[memory] Created file: /data/ai_agent/memory/MEMORY.md
+[memory] Created file: /data/ai_agent/HEARTBEAT.md
+[memory] Created file: /data/ai_agent/cron.json
+[memory] Created directory: /data/ai_agent/memory/daily
+[memory] Memory store initialized successfully
+[agent] [boot +10ms] P1: memory_store_init (rc=0)
+[session] Session manager initialized at /data/ai_agent/sessions
+[agent] [boot +10ms] P1: session_mgr_init (rc=0)
+[proxy] Loading proxy config...
+[proxy] No proxy (direct connection)
+[agent] [boot +10ms] P2: http_proxy_init (rc=0)
+[llm] LLM proxy initialized (model: mimo-v2.6-flash, host: )
+[agent] [boot +20ms] P3: llm_proxy_init (rc=0)
+[llm_router] Router initialized: 0 backends, profile=0
+[agent] [boot +20ms] P3: llm_router_init (rc=0)
+[llm_router] Backend 0 configured: token-plan-cn.xiaomimimo.com
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+LLM backend: token-plan-cn.xiaomimimo.com:443/v1/chat/completions (model: mimo-v2.6-flash) [router slot 0]
+API key saved.
+[web_search] No search key. Use: set_tavily_key / set_search_key
+[tools] Registered tool: web_search
+[tools] Registered tool: get_current_time
+[tools] Registered tool: read_file
+[tools] Registered tool: write_file
+[tools] Registered tool: edit_file
+[tools] Registered tool: list_dir
+[tools] Registered tool: cron_add
+[tools] Registered tool: cron_list
+[tools] Registered tool: cron_remove
+[tools] Registered tool: fetch_url
+[tools] Registered tool: run_shell
+[tools] Registered tool: recover_task
+[tools] Tools JSON built (12 builtin + 0 providers)
+[tools] Tool registry initialized
+[agent] [boot +30ms] P3: tool_registry_init (rc=0)
+[guard] Tool guard initialized (max_input=32768, rate_window=60s, rate_max=10)
+[agent] [boot +30ms] P3: tool_guard_init (rc=0)
+[skills] Initializing skills system
+[skills] Installed built-in skill: /data/ai_agent/skills/weather.md
+[skills] Installed built-in skill: /data/ai_agent/skills/daily-briefing.md
+[skills] Installed built-in skill: /data/ai_agent/skills/skill-creator.md
+[skills] Installed built-in skill: /data/ai_agent/skills/system-health.md
+[skills] Installed built-in skill: /data/ai_agent/skills/reminder.md
+[skills] Installed built-in skill: /data/ai_agent/skills/note-taker.md
+[skills] Installed built-in skill: /data/ai_agent/skills/translate.md
+[skills] Installed built-in skill: /data/ai_agent/skills/news-digest.md
+[skills] Installed built-in skill: /data/ai_agent/skills/feishu-test.md
+[skills] Installed built-in skill: /data/ai_agent/skills/task-manager.md
+[skills] Installed built-in skill: /data/ai_agent/skills/self-diagnostic.md
+[skills] Skills system ready (11 built-in)
+[agent] [boot +40ms] P3: skill_loader_init (rc=0)
+[agent] Agent loop initialized
+[agent] [boot +40ms] P3: agent_loop_init (rc=0)
+[cron] Loaded 0 cron jobs
+[agent] [boot +40ms] P3: cron_service_init (rc=0)
+[heartbeat] Heartbeat service initialized (file: /data/ai_agent/HEARTBEAT.md, interval: 120s)
+[agent] [boot +50ms] P3: heartbeat_init (rc=0)
+[agent] [boot +50ms] P3: voice_channel_init (rc=0)
+NSH commands registered
+[agent] [boot +50ms] P4: nsh_commands_init (rc=0)
+[agent] [boot +50ms] P5: outbound dispatch thread started
+[cron] Cron started (0 jobs, interval 10s)
+[heartbeat] Heartbeat started (every 2 min)
+[agent] [boot +50ms] P5: cron + heartbeat started
+[agent] [boot +50ms] P5: network_watch thread started (async)
+[agent] [boot +50ms] P6: nsh_commands_start (rc=0)
+[agent] [boot +50ms] AI Agent ready. Type 'help' in NSH for commands.
+[agent] Outbound dispatch started
+[agent] Network watcher started
+[netmgr] No saved WiFi credentials. Use CLI: set_wifi <ssid> <pass>
+[netmgr] Found iface eth0 addr 192.168.3.200
+[netmgr] Network connected: 192.168.3.200
+[netmgr] Found iface eth0 addr 192.168.3.200
+[agent] Network connected: 192.168.3.200
+[agent] Agent loop started, free heap: 139776
+[agent] Buffers: ctx=8192 hist=8192 tool=8192
+[agent] Tool output pool: 1 x 16384 bytes
+[agent] Tools JSON loaded: 4177 bytes
+[ws] WebSocket server started on port 28789
+[agent] All network services started!
+[cli] NSH CLI started. Type 'help' for commands.
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:0000007d00000000] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=125
+[vela_tls] Clock too old, forcing to 2026
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Clock synced from HTTP Date: 1794192498
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:0000007d00000000] iter=0 tool=read_file latency=2080ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTBEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9383 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:0000007d00000000] iter=1 tool=read_file latency=3060ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9769 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:0000007d00000000] iter=2 tool=run_shell latency=2380ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10612 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:0000007d00000000] iter=3 tool=run_shell latency=1860ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11208 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:0000007d00000000] iter=4 tool=read_file latency=1920ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11564 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 12 bytes text, 0 tool calls, finish=end_turn
+[agent] LLM resp: text=12, tool_use=0, calls=0
+[trace:0000007d00000000] iter=5 tool=(none) latency=3490ms llm=ok backend=0
+[trace:0000007d00000000] END status=ok iters=6 tools=5 llm_ms=14790 elapsed=1794192385s backend=0
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: HEARTBEAT_OK
+quit
+Exiting agent...
+read exiting
+[agent] Outbound dispatch exiting
+[agent] Shutdown requested — stopping services...
+[ws] WebSocket server stopped
+[cron] Cron service stopping
+[heartbeat] Heartbeat stopped
+[bus] Message bus destroyed
+[agent] Shutdown complete.
+nsh> [Kfree
+      total       used       free    maxused    maxfree  nused  nfree name
+     384160     135552     248608     377896     110736    676     49 Umem
+nsh> [K
+===== def-r4 =====
+ESP-ROM:esp32p4-eco7-20260109
+Build:Jan  9 2026
+rst:0x17 (CHIP_USB_UART_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x30100000,len:0x88
+load:0x4ff40000,len:0xb284
+SHA-256 comparison failed:
+Calculated: 1a0b6bcc4736c9c4c188e82fa8919d28238b16b16f13d667cf8ae076320960d7
+Expected: 00000000d02c0000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+entry 0x4ff49060
+*** Booting NuttX ***
+tcm: lma 0x00002020 vma 0x30100000 len 0x88     (136)
+dram: lma 0x000020b0 vma 0x4ff40000 len 0xb284   (45700)
+padd: lma 0x0000d348 vma 0x00000000 len 0x2cd0   (11472)
+imap: lma 0x00010020 vma 0x40090020 len 0x31d44  (204100)
+padd: lma 0x00041d6c vma 0x00000000 len 0xe28c   (57996)
+imap: lma 0x00050000 vma 0x40000000 len 0x8f568  (587112)
+total segments stored 6
+PMPCFG 9d9d9b9b 808f8d80 00008f8d 00000000
+PMP00 cfg=9b addr=09ffffff
+PMP01 cfg=9b addr=0ffc3fff
+PMP02 cfg=9d addr=13f03fff
+PMP03 cfg=9d addr=23f03fff
+PMP04 cfg=80 addr=13fc0000
+PMP05 cfg=8d addr=13fd2540
+PMP06 cfg=8f addr=13ff0000
+PMP07 cfg=80 addr=23fc0000
+PMP08 cfg=8d addr=23fd2540
+PMP09 cfg=8f addr=23ff0000
+PMP10 cfg=00 addr=00000000
+PMP11 cfg=00 addr=00000000
+PMP12 cfg=00 addr=00000000
+PMP13 cfg=00 addr=00000000
+PMP14 cfg=00 addr=00000000
+PMP15 cfg=00 addr=00000000
+
+NuttShell (NSH)
+nsh> [Kbuggy_app &
+buggy_app [5:100]
+nsh> [Kbuggy_app: producing, heartbeat at /data/ai_agent/evidence/heartbeat.txt
+ai_agent
+[agent] AI Agent - Vela AI Agent starting (build: 2026-11-05 22:34:36)
+[agent] [boot +0ms] P0: timezone set
+[agent] Mounting /data as tmpfs for simulation...
+[agent] [boot +0ms] P0: storage ready
+[agent] [boot +0ms] heap: arena=384160 free=259656 used=124504
+[cfgstore] Config store ready at /data/ai_agent/config/config.json
+[agent] [boot +10ms] P1: config_store_init (rc=0)
+[bus] Message bus initialized (depth 16)
+[agent] [boot +10ms] P1: message_bus_init (rc=0)
+[memory] Initializing memory store at /data/ai_agent
+[memory] Created file: /data/ai_agent/config/SOUL.md
+[memory] Created file: /data/ai_agent/config/USER.md
+[memory] Created file: /data/ai_agent/memory/MEMORY.md
+[memory] Created file: /data/ai_agent/HEARTBEAT.md
+[memory] Created file: /data/ai_agent/cron.json
+[memory] Created directory: /data/ai_agent/memory/daily
+[memory] Memory store initialized successfully
+[agent] [boot +10ms] P1: memory_store_init (rc=0)
+[session] Session manager initialized at /data/ai_agent/sessions
+[agent] [boot +10ms] P1: session_mgr_init (rc=0)
+[proxy] Loading proxy config...
+[proxy] No proxy (direct connection)
+[agent] [boot +10ms] P2: http_proxy_init (rc=0)
+[llm] LLM proxy initialized (model: mimo-v2.6-flash, host: )
+[agent] [boot +20ms] P3: llm_proxy_init (rc=0)
+[llm_router] Router initialized: 0 backends, profile=0
+[agent] [boot +20ms] P3: llm_router_init (rc=0)
+[llm_router] Backend 0 configured: token-plan-cn.xiaomimimo.com
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+LLM backend: token-plan-cn.xiaomimimo.com:443/v1/chat/completions (model: mimo-v2.6-flash) [router slot 0]
+API key saved.
+[web_search] No search key. Use: set_tavily_key / set_search_key
+[tools] Registered tool: web_search
+[tools] Registered tool: get_current_time
+[tools] Registered tool: read_file
+[tools] Registered tool: write_file
+[tools] Registered tool: edit_file
+[tools] Registered tool: list_dir
+[tools] Registered tool: cron_add
+[tools] Registered tool: cron_list
+[tools] Registered tool: cron_remove
+[tools] Registered tool: fetch_url
+[tools] Registered tool: run_shell
+[tools] Registered tool: recover_task
+[tools] Tools JSON built (12 builtin + 0 providers)
+[tools] Tool registry initialized
+[agent] [boot +30ms] P3: tool_registry_init (rc=0)
+[guard] Tool guard initialized (max_input=32768, rate_window=60s, rate_max=10)
+[agent] [boot +30ms] P3: tool_guard_init (rc=0)
+[skills] Initializing skills system
+[skills] Installed built-in skill: /data/ai_agent/skills/weather.md
+[skills] Installed built-in skill: /data/ai_agent/skills/daily-briefing.md
+[skills] Installed built-in skill: /data/ai_agent/skills/skill-creator.md
+[skills] Installed built-in skill: /data/ai_agent/skills/system-health.md
+[skills] Installed built-in skill: /data/ai_agent/skills/reminder.md
+skills] Installed built-in skill: /data/ai_agent/skills/note-taker.md
+[skills] Installed built-in skill: /data/ai_agent/skills/translate.md
+[skills] Installed built-in skill: /data/ai_agent/skills/news-digest.md
+[skills] Installed built-in skill: /data/ai_agent/skills/feishu-test.md
+[skills] Installed built-in skill: /data/ai_agent/skills/task-manager.md
+[skills] Installed built-in skill: /data/ai_agent/skills/self-diagnostic.md
+[skills] Skills system ready (11 built-in)
+[agent] [boot +40ms] P3: skill_loader_init (rc=0)
+[agent] Agent loop initialized
+[agent] [boot +40ms] P3: agent_loop_init (rc=0)
+[cron] Loaded 0 cron jobs
+[agent] [boot +40ms] P3: cron_service_init (rc=0)
+[heartbeat] Heartbeat service initialized (file: /data/ai_agent/HEARTBEAT.md, interval: 120s)
+[agent] [boot +50ms] P3: heartbeat_init (rc=0)
+[agent] [boot +50ms] P3: voice_channel_init (rc=0)
+NSH commands registered
+[agent] [boot +50ms] P4: nsh_commands_init (rc=0)
+[agent] [boot +50ms] P5: outbound dispatch thread started
+[cron] Cron started (0 jobs, interval 10s)
+[heartbeat] Heartbeat started (every 2 min)
+[agent] [boot +50ms] P5: cron + heartbeat started
+[agent] [boot +50ms] P5: network_watch thread started (async)
+[agent] [boot +50ms] P6: nsh_commands_start (rc=0)
+[agent] [boot +50ms] AI Agent ready. Type 'help' in NSH for commands.
+[agent] Outbound dispatch started
+[agent] Network watcher started
+[netmgr] No saved WiFi credentials. Use CLI: set_wifi <ssd> <pass>
+[netmgr] Found iface eth0 addr 192.168.3.200
+[netmgr] Network connected: 192.168.3.200
+[netmgr] Found iface eth0 addr 192.168.3.200
+[agent] Network connected: 192.168.3.200
+[agent] Agent loop started, free heap: 139776
+[agent] Buffers: ctx=8192 hist=8192 tool=8192
+[agent] Tool output pool: 1 x 16384 bytes
+[agent] Tools JSON loaded: 4177 bytes
+[ws] WebSocket server started on port 28789
+[agent] All network services started!
+[cli] NSH CLI started. Type 'help' for commands.
+vela> [agent] Processing message from system:heartbeat
+[skills] Skills summary: 1430 bytes
+[context] System prompt built: 3542 bytes
+[llm] LLM config updated atomically: token-plan-cn.xiaomimimo.com/v1/chat/completions (model: mimo-v2.6-flash)
+[trace:0000007e00000000] BEGIN chat=heartbeat chan=system
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 8809 bytes, alloc_fail=0 +0)
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=126
+[vela_tls] Clock too old, forcing to 2026
+[agent] Dispatching response → system:heartbeat
+[agent] System message [heartbeat]: 让我查一下...
+[heartbeat] Triggered agent check
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[vela_tls] Clock synced from HTTP Date: 1794192662
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 1: 1 calls
+[trace:0000007e00000000] iter=0 tool=read_file latency=2610ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/HEARTBEAT.md"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/HEARTBEAT.md (224 bytes)
+[agent] Tool read_file result: 224 bytes
+[agent] Skill file read — no shortcut, LLM will process
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 9380 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 2: 1 calls
+[trace:0000007e00000000] iter=1 tool=read_file latency=89320ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10021 bytes, alloc_fail=0 +0)
+[vela_tls] Pooled connection stale, reconnecting
+[vela_tls] Handshake start: Host=token-plan-cn.xiaomimimo.com, UNIX=1794192751
+[vela_tls] Handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 3: 1 calls
+[trace:0000007e00000000] iter=2 tool=run_shell latency=2040ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "ps"}
+[tools] Executing tool: run_shell
+[shell] Executing: ps
+[shell] Result: 481 bytes
+[agent] Tool run_shell result: 481 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 10847 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 4: 1 calls
+[trace:0000007e00000000] iter=3 tool=run_shell latency=1800ms llm=ok backend=0
+[agent] Tool call: run_shell args={"command": "free"}
+[tools] Executing tool: run_shell
+[shell] Executing: free
+[shell] Result: 179 bytes
+[agent] Tool run_shell result: 179 bytes
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11426 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[llm] Response: 0 bytes text, 1 tool calls, finish=tool_calls
+[agent] LLM resp: text=0, tool_use=1, calls=1
+[agent] Tool iter 5: 1 calls
+[trace:0000007e00000000] iter=4 tool=read_file latency=2960ms llm=ok backend=0
+[agent] Tool call: read_file args={"path": "/data/ai_agent/evidence/heartbeat.txt"}
+[tools] Executing tool: read_file
+[tool_files] read_file: /data/ai_agent/evidence/heartbeat.txt (5 bytes)
+[agent] Tool read_file result: 5 bytes
+[agent] Skill in progress — no shortcut
+[llm] OpenAI API with tools (model: mimo-v2.6-flash, 11853 bytes, alloc_fail=0 +0)
+[vela_tls] Reusing pooled connection to token-plan-cn.xiaomimimo.com:443
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+emac_stack_input: ERROR: emac RX netpkt_alloc failed
+[heartbeat] Triggered agent check
+quit
+Exiting agent...
+d exiting
+[agent] Outbound dispatch exiting
+[agent] Shutdown requested — stopping services...
+[ws] WebSocket server stopped
+[cron] Cron service stopping
+[heartbeat] Heartbeat stopped
+[vela_tls] Pool slot 0 still in use at shutdown, skipping
+[bus] Message bus destroyed
+[agent] Shutdown complete.
+nsh> [Kfree
+      total       used       free    maxused    maxfree  nused  nfree name
+     384160     240672     143488     378208      49168    933     13 Umem
+nsh> [K
