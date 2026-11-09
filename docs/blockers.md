@@ -222,3 +222,50 @@
   3. 构建前 `ls chip/esp-hal-3rdparty/.siliconloop_ready` 作为例行检查。
 - 需要 Ghee 做什么：知悉根因（非误删、非网络单因）；若认可建议 1，赛后
   按"新增补丁"流程落地。今晚 M4 板测不受阻（HAL 已恢复，mbedtls 拉取中）。
+
+## 2026-11-09 08:10 · build.sh 符号链接解析回主工作区，主区被误重链（已归档，主区无损）
+- 现象：为重建 M3 固件搭建了独立工作区 `/home/w/Project/openvela-m3rebuild/`，
+  其中 build.sh 用符号链接指向主区。构建时 `build.sh` 内部
+  `ROOTDIR=$(dirname $(readlink -f ${0}))` 把链接解析回主区实际路径，
+  `ROOTDIR=$(realpath .../../..)` 得到主区根——两次"重建"实际都在
+  主工作区执行（构建日志 `make: 进入目录 /home/w/Project/openvela/nuttx`）。
+  第二次构建（11-09 00:13）在主区触发重新链接。
+- 主区损害评估（逐项核实）：
+  - 源码/defconfig：零变化（git diff 为空）；.config 完好（HELLO_APP_FIXED=y
+    在，另有 .config.orig 备份）；
+  - HAL 工作副本：完好（.siliconloop_ready 在位，未触发 distclean——
+    .config 与 defconfig cmp 相等）；
+  - 产物：nuttx.bin / System.map / nuttx.elf / nuttx.map / nuttx.hex 被
+    重链（00:13），已全部改名归档为
+    `nuttx/<名>.误重链-2026-11-09-0013-来源不明`（bin sha256
+    f6e289cf…dc09a5，919,564 B），未删除；nuttx.manifest（47 B）删除
+    （构建再生）。
+  - 板子不受影响（未烧录任何东西，板上仍是答辩版固件）。
+- 已查明（根因链，含证据）：
+  1. 烧录 #3 固件（920,616 B，sha 99177f68…，11-08 08:14 产出）与当前
+     提交源码一致：nsh_commands.o = 08:13:58（最后一次源码 Edit 08:13:34
+     之后编译，size 显示 bss=0 即 16KB rb.0 不在）、tool_recover.o = 06:12
+     （宏统一版）；板上 free heap 136,664 = 旧版 120,280 + 16,384 精确
+     吻合。**此前"烧录 #3 是 0023/0024 过渡混合态、还带 16KB 缓冲"的
+     判断是错误的**，依据的是 m4-build-5/6.log（01:24/01:29，0023 版，
+     sram_seg=156,352）——那些构建早于源码修复，与烧录 #3 无关。
+  2. 08:14 构建为何可信：会话日志（seq 1680–1695 时间段）显示 08:12–08:13
+     三次 Edit 后 08:13:53 make 重编 nsh_commands.c（"CC: src/channels/
+     nsh_commands.c" 在 08:14:08 输出中），08:14:21 用 `nm -S | grep -c
+     'rb\.0'` = 0 验证过。
+  3. 归档的 00:13 重链产物与烧录 #3 功能同源但哈希/布局不等：大小差
+     1,052 B、drom 差 8 B、符号小漂移（tool_recover_execute −0x1FE、
+     s_tls_raw_buf +0x18）。08:14 版 System.map 未留档，组装级差异
+     （镜像头/对齐/归档序）无法逐步归因。
+- 防再发（已提出修改建议，等 Ghee 确认后改 CLAUDE.md 第 6 节）：
+  1. build.sh 只能用实体副本（cp），禁止符号链接到其他工作区；
+  2. 每次固件构建后立即核对 System.map：预期符号的出现/消失
+     （本次应无 rb.0）、sram_seg 大小与预期一致，并把 bin 的
+     sha256 与 System.map 一并留档；
+  3. 烧录前的固件必须是从当次构建日志能对应到"哪个 sha256、哪些
+     .o 重编过"的产物。
+- 影响：M3 重建推后（改用实体副本方案时再执行，见 Ghee 11-09 指示）；
+  11-08 板测数据有效（烧录 #3 与提交源码一致），无需重测已完成的轮次；
+  M4 内存回归结论的表述已按"待可复现固件重测"加注（m4-smoke-notes.md、
+  patches/README 0024 节）。
+- 需要 Ghee 做什么：知悉；确认 CLAUDE.md 第 6 节修改建议后我再动手。
