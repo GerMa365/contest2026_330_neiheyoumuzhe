@@ -89,6 +89,18 @@ M4 板上 smoke 与首轮验收（内存回归判定成立，详见
 `m4-flashback-B.r1`）。构建与符号审计单见
 `2026-11-08/m4-build-and-symbol-audit.md`（前一提交）。
 
+## 2026-11-12
+
+编译器统一重链（未烧录，详见 `2026-11-12/m4-unify-1340-build-record.md`）：
+11-10 编译失败根因为 GCC 13.4.0/14.2.0 混用（blockers 11-11 12:00 条），
+全工作区 3,254 个 .o 的 DWARF producer 扫描（`m4-unify-1340-obj-scan.txt`）
+确认残留 14.2.0 编译单元仅 3 个（专属仓 app/ 目录），经 Ghee 确认删除后
+以 prebuilts 13.4.0 重编（`m4-unify-1340-make.log`、工具链确认
+`m4-unify-1340-toolchain-record.txt`）。判据：nuttx ELF 内 14.2.0
+编译单元 = 0，通过；sram_seg 139,968 B 与 0024 预期吻合。产物
+nuttx.bin 919,652 B（sha256 6a2daa40…，未烧录），System.map 见
+`m4-unify-1340-System.map`。
+
 ## 复现方式
 
 日志由 picocom 记录：

@@ -1,0 +1,18 @@
+== 13.4.0 统一重编记录 · 2026-11-12 00:24:19 CST
+-- 编译器（PATH 前置 prebuilts 后）
+PATH=/home/w/Project/openvela/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin:$PATH
+/home/w/Project/openvela/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin/riscv-none-elf-gcc
+riscv-none-elf-gcc (GCC) 13.4.0
+
+-- 删除的 3 个 14.2.0 对象（删除前 sha256）
+90daa8c8eacb755f0b3d3dcfa81c50e2a414853e3e5998e152c9d1c8edeb1239  /home/w/Project/openvela/contest2026_330_neiheyoumuzhe/app/hello_app/buggy_app_main.c.home.w.Project.openvela.contest2026_330_neiheyoumuzhe.app.hello_app.o
+90daa8c8eacb755f0b3d3dcfa81c50e2a414853e3e5998e152c9d1c8edeb1239  /home/w/Project/openvela/contest2026_330_neiheyoumuzhe/app/hello_app/buggy_app_main.c.home.w.Project.openvela.contest2026_330_neiheyoumuzhe.app.hello_app_1.o
+52ea859a9ee6d9e9387e3df6df5926a7b2c36686e10f90ac85c46d3e0839de38  /home/w/Project/openvela/contest2026_330_neiheyoumuzhe/app/hello_app_fixed/buggy_app_fixed_main.c.home.w.Project.openvela.contest2026_330_neiheyoumuzhe.app.hello_app_fixed.o
+
+-- 第二类 6 个汇编 .o（保留；上轮 13.4.0 重编产物，时间戳）
+2026-11-11 21:19:24.623767535 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/fork.o
+2026-11-11 21:19:24.407765632 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/esp_vectors.o
+2026-11-11 21:19:24.487766337 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/riscv_mhartid.o
+2026-11-11 21:19:24.423765773 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/riscv_exception_common.o
+2026-11-11 21:20:56.480553105 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/esp_head.o
+2026-11-11 21:19:24.556766945 +0800  /home/w/Project/openvela/nuttx/arch/risc-v/src/riscv_saveusercontext.o
