@@ -15,6 +15,7 @@
 | 参赛仓库在工作区内的远程名 | `origin` → https://github.com/open-vela/contest2026_330_neiheyoumuzhe |
 | fork 远程 | `fork` → `https://github.com/GerMa365/contest2026_330_neiheyoumuzhe.git` |
 | esptool | `/home/w/esp-venv/bin/esptool` v5.3.1（虚拟环境 /home/w/esp-venv，操作板子的脚本一律用它） |
+| 交叉编译器（riscv-none-elf） | prebuilts GCC 13.4.0（~/.bashrc 里 esp-toolchain 的 14.2.0 优先级更高，禁止依赖默认 PATH） |
 
 下文所有相对路径都以 ROOT 为起点；`REPO` 指 `contest2026_330_neiheyoumuzhe/`。
 
@@ -122,6 +123,9 @@ PORT=<串口> contest2026_330_neiheyoumuzhe/tools/hil/flash.sh
 - **build.sh 必须用实体副本**（cp），禁止符号链接到其他工作区——脚本内部 `readlink -f $0` 会把链接解析回真实路径，导致构建实际跑在链接目标的工作区（2026-11-09 误重链事故，见 blockers）。
 - **每次固件构建后立即核对并留档**：System.map 中预期符号的出现/消失（改内存布局的补丁必须写明核对项，如 0024 后应无 `rb.0`）、链接输出里 `sram_seg` 大小与预期一致；bin 的 sha256 与 System.map 复制进 `REPO/docs/evidence/<日期>/` 留档。
 - **烧录前固件必须可溯源**：能对应到当次构建日志（哪个 sha256、哪些 `.o` 重编过）；对不上就重编，不烧"来源不明"的产物。
+- **工具链固定（2026-11-12 起，根因见 blockers 11-11 12:00 条）**：统一使用 prebuilts GCC 13.4.0。build.sh 虽会经 envsetup.sh 自动前置 prebuilts，但当前 .config 比 defconfig 多出 CONFIG_SILOOP_MEMPROBE，运行 build.sh 会触发重新配置与 distclean（会删除 HAL 目录），两者一致之前禁止运行 build.sh；任何绕过 build.sh 的裸 make 必须显式前置 `PATH=/home/w/Project/openvela/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin:$PATH`，编译前 `riscv-none-elf-gcc --version` 确认 13.4.0 并写入构建记录。禁止修改 `~/.bashrc` 的 PATH 来解决编译器问题。
+- **编译器判据核对（每次固件构建后）**：nuttx ELF 内 14.2.0 编译单元必须为 0，两项都查：`riscv-none-elf-readelf -p .debug_str nuttx | grep -c '14\.2\.0'` 与 `riscv-none-elf-readelf -p .debug_line_str nuttx | grep -c '14\.2\.0'` 均应输出 0；任一不为 0 时找出对应 `.o` 重编，未清零不烧录、不留档为有效固件。
+- **make 干跑规则（2026-11-12）**：禁止使用 make -t（touch 模式）；make -n 不算只读（递归 `$(MAKE)` 会实际执行子构建），需要时先说明原因并取得 Ghee 同意。
 
 ---
 
