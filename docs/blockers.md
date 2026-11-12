@@ -270,3 +270,49 @@
   patches/README 0024 节）。最终口径（Ghee 11-09 认可）：回归结论预计
   成立，重测用于把数字定稿，不是怀疑结论方向。
 - 需要 Ghee 做什么：知悉；确认 CLAUDE.md 第 6 节修改建议后我再动手。
+
+## 2026-11-11 12:00 · 编译器混用：11-08 固件由 GCC 13.4.0/14.2.0 混编（根因已定位，Ghee 已决定统一 13.4.0）
+- 现象：11-10 编译 esp_start.c 报 `os.h:357 implicit declaration of
+  nxsched_usleep`（error），同一文件 11-08 能编过。取证（会话原始转录
+  + .o 的 DWARF producer 指纹 + A/B 复现实验）结论：**编译器变了**——
+  11-08 01:16 构建走 build.sh（prebuilts GCC 13.4.0），11-08 06:12/08:13
+  与 11-10 全部构建走裸 make（`~/.bashrc` 的 GCC 14.2.0，esp-toolchain
+  8-13 起在 PATH）。GCC 14 将隐式函数声明从 warning 升为 error。
+- 混用机制（Ghee 推测证实）：`build.sh:233` source `build/envsetup.sh`，
+  其 `setup_global_paths()`（envsetup.sh:1039-1044、1123）把
+  `prebuilts/gcc/linux-x86_64/riscv-none-elf/bin` 放到 PATH 最前 →
+  13.4.0；直接 `make`（哪怕带 `PATH=$HOME/esp-venv/bin:$PATH` 前缀）
+  不经过 build.sh，PATH 上第一个 riscv-none-elf-gcc 是 .bashrc 的
+  14.2.0。esp-venv 里只有 python/esptool/kconfig 工具，无 gcc。
+- 烧录 #3（答辩版）构成：大部分 .o = 11-08 01:16 build.sh 轮（13.4.0，
+  含 ai_agent 全量源文件），4 个 CU = 14.2.0（lib_utsname/nsh_commands/
+  tool_recover + 11-10 补编的 vela_tls）；esp_start.o 始终是 13.4.0 版
+  （01:16 编出后未被成功重编过）。板上运行无恙，无需处置；但
+  "逐字节可复现"必须固定工具链版本。
+- **已知问题（暂不修，Ghee 指示 M4 完成后单独出补丁）**：补丁 0001 引入的
+  `nxsched_usleep`（esp_start.c:725 定义）无任何头文件声明；HAL os.h:357
+  的 static inline `esp_os_task_delay_adapter` 直接调用它（esp_start.c:39
+  → esp_lowputc.h:48 → critical_section.h:17 → os.h）。GCC 13 下是
+  warning，GCC 14 下是 error。在统一 13.4.0 后此问题被绕开，但潜伏缺陷
+  仍在。
+- 决定（Ghee 11-11）：编译路线选 1a——统一使用 prebuilts GCC 13.4.0。
+  执行方式：不修改 ~/.bashrc；每次编译显式把 prebuilts 工具链放 PATH
+  最前，编译前 `riscv-none-elf-gcc --version` 确认 13.4.0 并写进构建记录。
+- 影响：主工作区现有 1478 个 .o 是 14.2.0 产物（11-10 11:30 config.h 刷新
+  触发全树重编 + 11:57/12:12 失败重试），全部需要按 13.4.0 重编；清单与
+  重编计划已另报 Ghee，确认后执行。
+- 需要 Ghee 做什么：知悉根因链；确认重编计划（另发）。
+
+## 2026-11-12 13:25 · 待办：Make.dep 依赖文件残留 14.2.0 头文件路径（不阻塞 M4）
+- 现象：nuttx/libs/libc/bin/Make.dep（mtime 2026-11-10 11:30）等依赖文件
+  是 11-10 在 14.2.0 PATH 下生成的，规则里仍引用
+  `/home/w/esp-toolchain/riscv-none-elf-gcc/lib/gcc/riscv-none-elf/14.2.0/include/stdarg.h`
+  等路径（lib_utsname.o 的依赖链，经 stdio.h:33 → <stdarg.h> 引入）。
+- 影响：对固件无影响——该 stdarg.h 是静态发行文件，`.debug_str` 与
+  `.debug_line_str` 双判据均为 0（11-12 核对），编译产物不引用 14.2.0
+  工具链路径。同因产生的 lib_utsname.o 每轮 make 重编现象，重编产物
+  在 13.4.0 PATH 下，无污染；触发点未定位，不再追查（Ghee 11-12 指示）。
+- 待办（M4 完成后，与 0001 的 nxsched_usleep 问题一起处理）：
+  在 13.4.0 PATH 下重新生成依赖文件（或按补丁流程处理），清掉
+  esp-toolchain 路径残留。
+- 需要 Ghee 做什么：知悉；M4 收尾时提醒排入处理顺序。
