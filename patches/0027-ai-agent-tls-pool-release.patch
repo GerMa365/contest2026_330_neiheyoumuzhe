@@ -1,0 +1,59 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -262,6 +262,36 @@
+     pthread_mutex_unlock(&s_pool_lock);
+ }
+ 
++void vela_tls_pool_release_idle(void)
++{
++    /* SiliconLoop: free idle pooled TLS connections at round end.
++     * A live pooled connection holds ~35-40KB of heap (two 16.4KB
++     * mbedtls in/out buffers plus the session and peer certificate),
++     * and with a 120s heartbeat versus the 30s idle limit it is
++     * never reused across rounds - it just pins the heap until the
++     * next round's acquire evicts it and immediately re-handshakes
++     * into the freed space.  Freeing at round end returns those
++     * blocks to the heap 120s earlier, so the next round starts
++     * above the 32KB guard instead of below it.  Handshake count is
++     * unchanged: the next round always reconnects either way.  (The
++     * 2026-11-08 write failures happened inside a round, not across
++     * rounds, so they are addressed by the stack-allocated request
++     * header in tls_write_request, not here.)
++     */
++    pthread_mutex_lock(&s_pool_lock);
++    for (int i = 0; i < CONN_POOL_SIZE; i++) {
++        if (s_pool[i].in_use) {
++            continue;
++        }
++        if (s_pool[i].valid) {
++            tls_ctx_free(&s_pool[i].ctx);
++            s_pool[i].valid = false;
++            s_pool[i].host[0] = '\0';
++        }
++    }
++    pthread_mutex_unlock(&s_pool_lock);
++}
++
+ static int tls_ctx_connect(tls_ctx_t* ctx, const char* host, const char* port)
+ {
+     int ret;
+
+--- a/src/infra/vela_tls.h
++++ b/src/infra/vela_tls.h
+@@ -115,6 +115,16 @@
+  */
+ void vela_tls_pool_cleanup(void);
+ 
++/**
++ * Release idle pooled TLS connections (not currently in use).
++ * SiliconLoop: called at the end of an agent round. Each pooled
++ * connection pins ~35-40KB of heap (mbedtls in/out buffers + session),
++ * and with a 120s heartbeat against a 30s idle limit it would never
++ * be reused - releasing it at round end returns the heap ~120s
++ * earlier, before the next round's memory guard check.
++ */
++void vela_tls_pool_release_idle(void);
++
+ #ifdef __cplusplus
+ }
+ #endif

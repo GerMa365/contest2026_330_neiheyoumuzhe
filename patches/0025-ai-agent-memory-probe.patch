@@ -1,0 +1,71 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -28,6 +28,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef CONFIG_SILOOP_MEMPROBE
++#include <malloc.h> /* SiliconLoop: mallinfo() for peak-path probe (0025) */
++#endif
+ 
+ /* POSIX networking */
+ #include <netdb.h>
+@@ -442,12 +445,39 @@
+ 
+ /* ── HTTP/1.1 framing ────────────────────────────────────────── */
+ 
++#ifdef CONFIG_SILOOP_MEMPROBE
++/* SiliconLoop: log the peak-path heap watermark right before the
++ * request write.  This is the tightest point of the LLM request:
++ * the body (~12KB) is fully serialized and held in a static buffer,
++ * and the next allocation is the 4KB header block below.  The M4
++ * memory regression surfaces exactly here (write -5 = this malloc
++ * failing).  Uses mallinfo() only — no heap allocation of its own.
++ * Gated by CONFIG_SILOOP_MEMPROBE; see patches/README.md 0025. */
++static void sloop_memprobe_peak(size_t body_len)
++{
++    struct mallinfo mi = mallinfo();
++    syslog(LOG_INFO,
++        "[sloop-memprobe] peak pre-write req=%zu maxfree=%u free=%u\n",
++        body_len, mi.mxordblk, mi.fordblks);
++}
++#define SLOOP_MEMPROBE(body_len) sloop_memprobe_peak(body_len)
++#else
++#define SLOOP_MEMPROBE(body_len) \
++    do {                         \
++    } while (0)
++#endif
++
+ static int tls_write_request(tls_ctx_t* ctx,
+     const char* method, const char* host,
+     const char* path,
+     const vela_header_t* headers,
+     const char* body, size_t body_len)
+ {
++    /* SiliconLoop: report the heap state at the exact point where the
++     * M4 regression bites (request header is written below).  No
++     * allocation here — mallinfo() only reads mm statistics. */
++    SLOOP_MEMPROBE(body_len);
++
+     /* Heap-allocate header buffer to reduce stack pressure.
+      * This function is called from threads with limited stack
+      * (outbound dispatch 16KB) and the TLS context already
+
+--- a/Kconfig
++++ b/Kconfig
+@@ -320,5 +320,15 @@
+         2 = confirm: executes only when the LLM passes confirm:true.
+         3 = auto: executes immediately after the C-side guards pass.
+ 
++config SILOOP_MEMPROBE
++    bool "SiliconLoop peak-path memory probe (LLM request write)"
++    default y
++    ---help---
++        SiliconLoop: log one line before each LLM request write
++        (serialization done, before the 4KB header malloc in
++        vela_tls): request bytes, largest free block, total free.
++        Uses mallinfo() only, allocates nothing.  Diagnostic aid for
++        the M4 memory regression (patch 0025); safe to leave on.
++
+ endif
+ 

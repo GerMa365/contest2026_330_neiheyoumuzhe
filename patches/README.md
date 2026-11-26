@@ -1,6 +1,6 @@
 # 补丁总索引
 
-23 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
+32 个补丁分布在 5 个仓库。**没有 0006，编号跳过。** 各补丁的性质、
 根因、解法、局限与验证记录见下文对应小节。
 
 | 补丁 | 目标仓库 | 内容 |
@@ -28,10 +28,501 @@
 | 0022 | `packages/ai_agent` | L3 ELF 热修复（exec_spawn + 符号表 + 阶梯第 3 级） |
 | 0023 | `packages/ai_agent` | fwpush 串口下发 CLI（修复包经校验落盘 /data/patches） |
 | 0024 | `packages/ai_agent` | 路径宏统一 + fwpush 流式校验（删 16KB 静态回读缓冲） |
+| 0025 | `packages/ai_agent` | 峰值路径内存探针（SLOOP_MEMPROBE，Kconfig 可关） |
+| 0026 | `packages/ai_agent` | TLS 请求头部缓冲改栈上 768B（删 4KB 堆分配） |
+| 0027 | `packages/ai_agent` | 轮末释放空闲池化 TLS 连接（vela_tls_pool_release_idle） |
+| 0028 | `apps` | mbedTLS 发送记录钳制 4KB（OUT_CONTENT_LEN clamp） |
+| 0029 | `nuttx` | ESPRESSIF_SPIRAM Kconfig 菜单回移（PSRAM 步骤 0，IGNORE_NOTFOUND 默认 y） |
+| 0030 | `packages/ai_agent` | fwpush 写失败打点（errno=12 现场取证） |
+| 0031 | `packages/ai_agent` | PSRAM 步骤 3a：mbedTLS 分配器重定向到第二堆（psram_heap） |
+| 0032 | `packages/ai_agent` | tool_shell UAF 修复 + pclose ECHILD 语义 + 工具结果 UTF-8 兜底 |
+| 0033 | `packages/ai_agent` | s_sec_table 补 recover_task 行 + 删 TOOL_SEC_SENSITIVE 旧宏 |
 
 0001–0014 为九月阶段（初赛），0015–0021 为决赛新增的闭环功能，
 0022–0023 为 M4（L3 热修复）新增（2026-11-08），0024 为板测当日
-修复的收口（2026-11-08）。
+修复的收口（2026-11-08），0029/0030 为 PSRAM 准备阶段新增
+（2026-11-21），0031/0032 为 PSRAM 3a + 心跳 400 修复（2026-11-23），
+0025–0028 为内存压缩批（2026-11-12 起在工作树生效、2026-11-25 随
+tech-debt 批 2 导出），0033 为 tech-debt 批 2 导出的守卫补全与删宏
+（2026-11-25）。
+
+---
+
+# 0029-nuttx-spiram-kconfig-backport.patch
+
+## 性质：Kconfig 菜单回移，PSRAM 实施步骤 0（cc-plan-psram.md v2.2）
+
+## 目标仓库
+
+`nuttx`（`arch/risc-v/src/common/espressif/Kconfig`）
+
+## 解决的问题
+
+当前工作区 nuttx 树（基线 dd92bcf4257）的 espressif Kconfig 缺少
+`ESPRESSIF_SPIRAM` 菜单块，`CONFIG_ESPRESSIF_SPIRAM=y` 写进 defconfig
+会被静默丢弃（esp_start.c / hal_esp32p4.mk / hal_esp32p4.cmake 引用该
+符号但 Kconfig 无定义）。从 knowngood 树（/home/w/Project/knowngood_esp32p4）
+回移整个菜单块（menuconfig ESPRESSIF_SPIRAM 至 endif # ESPRESSIF_SPIRAM）。
+
+## 与 knowngood 原文的差异
+
+仅一处：`ESPRESSIF_SPIRAM_IGNORE_NOTFOUND` 的 `default n` 改为
+`default y`（探测失败保启动，便于回退定位）。已用 diff 核对回移块与
+knowngood 原文（47–135 行），除该行外逐字一致。
+
+## 引用符号核对（回移块内 select / depends on / default if）
+
+| 符号 | 当前树中是否存在 | 依据 |
+|---|---|---|
+| `ARCH_CHIP_ESP32P4` | 存在（menuconfig 的 depends on） | arch/risc-v/Kconfig:73 |
+| `!ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` | 存在（块内自定义，同文件） | 本补丁新增块内 |
+| `ESP32P4_REV_MIN_0`（速度 choice 的 default if / depends on） | 存在 | arch/risc-v/src/esp32p4/Kconfig:30 |
+| `ESPRESSIF_DONT_USE_ROM_LIBC`（被 `ESPRESSIF_SPIRAM_USER_HEAP` select） | **不存在** | 全树 grep 无定义，仅 hal_esp32p4.mk:180 / hal_esp32p4.cmake:203 消费 |
+
+**缺失符号 1 个：`ESPRESSIF_DONT_USE_ROM_LIBC`**。它只被回移块内的
+`ESPRESSIF_SPIRAM_USER_HEAP` 引用（default y 会 select 它）。处置：
+siliconloop_exp defconfig 显式 `# CONFIG_ESPRESSIF_SPIRAM_USER_HEAP is not
+set`（本项目用独立第二堆方案，不并入系统堆，本就不需要该选项；select
+不生效即无连锁影响）。knowngood 树中该符号同样缺失（同一问题，回移时
+原样保留，不在此补丁内改 knowngood 的行为）。
+
+## Kconfig 内嵌块与 0029 相邻上下文
+
+插入点：`endchoice # ESPRESSIF_FLASH` 之后、`config ESPRESSIF_IDF_ENV_FPGA`
+之前（knowngood 中同位置）。当前树该位置为 61–63 行区域，回移后
+Kconfig 2219 → 2308 行。
+
+## 局限
+
+- 菜单块不选中时零影响（纯符号定义）。
+- `ESPRESSIF_SPIRAM_USE_8LINE_MODE` / `_ECC` 为 knowngood 原样保留项，
+  本项目不启用。
+- 已知偏差：knowngood 的 `ESPRESSIF_SPIRAM_USER_HEAP` 默认 y，本项目
+  defconfig 显式关掉；若未来切回 USER_HEAP 路线需先补
+  `ESPRESSIF_DONT_USE_ROM_LIBC` 的 Kconfig 定义。
+
+## 验证记录
+
+- 导出后干净副本 `git apply --check` + `git apply` + 与工作树
+  `cmp` 逐字节一致（2026-11-21）。
+- 未重配 .config、未编译（本阶段不允许）。
+
+---
+
+# 0030-ai-agent-fwpush-fail-probe.patch
+
+## 性质：失败现场打点，只加在写失败分支，成功路径不变
+
+## 目标仓库
+
+`packages/ai_agent`（`src/channels/nsh_commands.c` cmd_fwpush）
+
+## 解决的问题
+
+R2-new #2（2026-11-18）fwpush 写 /data tmpfs 报 `errno=12`，推包中止；
+2026-11-20 三次同流程未复现，且堆读数健康（free=89,560 B）。失败点
+无法从既有日志回读（无打点）。按 cc-report-1120-errno12.md §4.3 第 2 条
+在失败点加一次性打点，等下一次自然复现时留现场。
+
+## 打点内容
+
+写失败分支额外打印一行：`fwpush: write failed detail: got=<已写入累计
+字节数> ret=<fwrite 返回值> errno=<n> heap_fordblks=<mallinfo().fordblks>
+heap_mxordblk=<mallinfo().mxordblk>`。原有 `fwpush: write failed
+(errno=%d)` 行保留在其后（下游脚本 grep 该行不受影响）。
+
+## 根因（为什么现在加）
+
+cc-plan-psram.md 1.6 节：失败请求 ≈1,064 B 的 tmpfs realloc 在
+free≈89.5 KB 的堆上不该失败，ENOMEM 另有来源；定位的前提是失败瞬间
+的已写字节数、fwrite 返回值与堆水位同屏可见。现有 `heap_info`（vela
+CLI）只能取推包前/后读数，看不到写循环内的瞬间。
+
+## 局限
+
+- 打点在 fwrite 失败**之后**执行，读数反映失败后的堆状态（可能已被
+  stdio 层释放部分缓冲），是"现场边界"而非冻结现场。
+- `printf` 到串口本身有一次 UART 写，若失败原因是 UART 阻塞相关则
+  打点行为本身可能受影响——按 1.6 节分析，主嫌疑是 tmpfs realloc 与
+  stdio 层，此风险极低。
+- 成功路径零改动（无新增 printf、无变量提升）。
+
+## 验证记录
+
+- 导出后干净副本 `git apply --check` + `git apply` + `cmp` 一致
+  （2026-11-21）。
+- 未编译（本阶段不允许）；编译验证随下次固件构建进行。
+
+---
+
+# 0031-ai-agent-psram-3a-mbedtls-redirect.patch
+
+## 性质：PSRAM 步骤 3a，只做 mbedTLS 分配器重定向；无 cJSON 重定向，无功能行为变化
+
+## 目标仓库
+
+`packages/ai_agent/`（新增 `src/infra/psram_heap.c`、
+`include/infra/psram_heap.h`；改动 `src/agent_main.c`、
+`src/channels/nsh_commands.c`、`Makefile`）
+
+## 基线提交
+
+0030 应用后的 ai_agent 树（上游基线 `31faed7`，增量导出）。
+
+## 解决的问题
+
+系统堆只有约 404 KB 且瓶颈是最大连续空闲块（cc-plan-psram.md §1）。
+PSRAM 已点亮（补丁 0029 + 第 1 轮板测，2026-11-23，3 次冷启动探测
+全过），但一直没人用。步骤 3a 把 mbedTLS 的 calloc/free 钩到独立
+PSRAM 第二堆上，让 TLS 会话（握手缓冲 16 KB 级、证书解析）的大块
+分配离开系统堆——这是堆压力最大、且与 L3 热修复 ELF（内部 SRAM）
+无交集的消费者。
+
+## 根因
+
+原固件里 mbedTLS 走默认 libc malloc/free（CONFIG_MBEDTLS_PLATFORM_
+MEMORY=y 但从未调用 mbedtls_platform_set_calloc_free），所有 TLS
+大块分配都压在 404 KB 系统堆上，直接参与第 7 步序列化 OOM 与
+errno=12 一类失败。
+
+## 解法
+
+- `psram_heap_init()`（幂等，静态标志 + 堆句柄双保险防重入）：
+  `esp_psram_is_initialized()` 为真时，用
+  `esp_psram_extram_vaddr_start()/vaddr_end()` 取窗口，
+  `mm_initialize("psram", …)` 注册第二堆，然后
+  `mbedtls_platform_set_calloc_free(psram_calloc, psram_free)` 安装。
+  每个结果分支打一行 `[sloop-psram]` syslog（HAL 成功路径日志被
+  裁剪，这一行是板测正式证据：物理容量、堆起止、大小）。
+- 分配包装 `psram_calloc`：PSRAM 堆就绪走 `mm_calloc(g_psram_heap)`，
+  否则回退 `mm_calloc(g_mmheap)`（flat 构建 CONFIG_MM_KERNEL_HEAP
+  未开，系统堆即 g_mmheap，kmm_* 未编译）。
+- 释放包装 `psram_free`：按地址区间分派——指针落在注册的 PSRAM
+  窗口内走 PSRAM 堆，否则回系统堆；覆盖钩子安装前用 libc 分配、
+  安装后经钩子释放的存量指针。
+- 调用点：`agent_main.c` P0 阶段（tzset 之后、P1 config_store_init
+  之前），早于任何 TLS 连接（首次心跳在 P5）。
+- `heap_info`（nsh_commands.c cmd_heap_info）追加一行
+  `psram: arena= free= maxfree=`（mm_mallinfo 读第二堆）；未初始化
+  打印 `psram: n/a`。原有输出不变。
+- **不做** cJSON 重定向（按 cc-plan-psram.md 3a 范围）。
+
+## 局限
+
+- `mbedtls_platform_set_calloc_free` 是全局钩子，影响镜像内全部
+  mbedTLS 用户（不只 ai_agent）；审计确认全部调用方经
+  mbedtls_*_free() 释放、无"裸 free() 释放 mbedTLS 指针"（见
+  cc-report-1123-3a-uaf.md A.5）。
+- PSRAM 带宽低于内部 SRAM（200 MHz 四线），TLS 吞吐会略降；
+  换取系统堆最大空闲块显著回升。
+- 不含 L3 热修复 ELF 的 PSRAM 放置（那是步骤 3b，需先验证
+  PMP 执行权限与 i-cache 写回，cc-plan-psram.md §4 顺序约束）。
+- Makefile 新增 4 个 HAL 头文件 include 路径
+  （esp_psram/esp_common/nuttx-esp32p4），依赖芯片目录符号链接
+  arch/risc-v/src/chip → esp32p4。
+
+## 验证记录
+
+- 干净副本（上游 31faed7 + 0007–0030 共 17 个补丁）上
+  `git apply --check` + `git apply` 通过（2026-11-23）。
+- 已编译：13.4.0 统一工具链，make 通过；14.2.0 双判据均为 0；
+  System.map 出现 `psram_heap_init`（0x40058874）与
+  `mbedtls_platform_set_calloc_free`（0x4005bc2a）；nuttx.bin
+  strings 可见 `[sloop-psram]`。板测待烧录后进行。
+
+---
+
+# 0032-ai-agent-tool-shell-uaf-utf8.patch
+
+## 性质：缺陷修复（UAF + pclose 语义）+ 防御性兜底（UTF-8 清洗）
+
+## 目标仓库
+
+`packages/ai_agent/`（`src/tools/tool_shell.c`、`src/core/agent_loop.c`）
+
+## 基线提交
+
+0031 应用后的 ai_agent 树（与 0031 同一上游基线 `31faed7`）。
+
+## 解决的问题
+
+心跳轮 LLM 请求被服务端拒 400 "Invalid JSON in request body"：
+M3 夜间回归 7/7 次、11-23 第 1 轮板测 1 次（cc-report-1123-400.md）。
+每次 400 的前一轮都有 run_shell 走失败路径。
+
+## 根因（两个叠加缺陷）
+
+1. **UAF**：tool_shell.c 原第 511 行先 `cJSON_Delete(root)` 再在
+   错误分支里用 `command`（指向 root 树内 valuestring）拼错误 JSON。
+   释放后 mm_free 把堆空闲链表 flink/blink 写进前 8 字节，错误串里
+   带上 0x4ff4xxxx 一类非 UTF-8 字节。
+2. **pclose 恒为 -1**：链接的 apps/system/popen 实现里 pclose()
+   waitpid() 子 shell；CONFIG_SCHED_HAVE_PARENT 未开导致 waitpid
+   返回 ECHILD，**任何命令** pclose 都是 -1，全部命令被当失败处理，
+   真实输出被丢弃，稳定走进 UAF 分支。
+
+## 解法
+
+1. tool_shell.c：`cJSON_Delete(root)` 移到 `command` 最后一次使用
+   之后（成功/失败两分支各自 Delete）；全文件扫过无同类
+   "先 Delete 后使用"。
+2. popen 分支三态化：`pclose<0 且 errno==ECHILD` → exit=unknown，
+   有输出即成功、输出照常返回（不再丢）；其他非零按失败并在返回
+   串与日志里带 errno 数值。判定依据：System.map popen
+   0x4006cc7c / pclose 0x4006ce3a + readelf FILE 符号 + 反汇编
+   waitpid 调用，链接的实现是 apps/system/popen（非 newlib）。
+3. 兜底防线（agent_loop.c）：新增 `utf8_sanitize()`，工具结果进
+   请求 JSON 前把非法 UTF-8 字节替换为 '?'（合法 ASCII/2–4 字节
+   序列原样通过）；cap_tool_content 长/短两条路径都过清洗，
+   截断路径 utf8_cut 之后同样补一次。
+4. B3 只读核对：确定性代码（tool_recover.c / heartbeat.c /
+   skill_loader.c / tool_guard.c / agent_loop.c）**不读**
+   run_shell 退出状态——agent_loop 的 TASK_COMPLETE 是对输出串的
+   字符串搜索，与 exit 无关。修 exit 语义不影响恢复阶梯。
+
+## 局限
+
+- ECHILD 分支把"有输出"当成功：命令真失败但碰巧有 stderr 混入
+  stdout 时会被误判成功——在 pclose 语义修好（如开
+  CONFIG_SCHED_HAVE_PARENT）前的最小可用近似，行为与"输出是
+  权威"一致。
+- utf8_sanitize 逐字节扫描 O(n)，工具结果上限 4 KB（SHELL_OUTPUT_
+  MAX）/1,536 B（TOOL_MSG_MAX），开销可忽略。
+- reasoning 内容短路径未清洗（解析自服务端 JSON，本就合法）。
+
+## 验证记录
+
+- 干净副本上 0031 之后顺序 `git apply --check` 通过（2026-11-23）。
+- 已编译通过（13.4.0）；板测待烧录后进行。
+
+---
+
+# 0025-ai-agent-memory-probe.patch
+
+## 性质：诊断打点（Kconfig 可关），PSRAM 3a 的伴随产物
+
+## 目标仓库
+
+`packages/ai_agent`（`src/infra/vela_tls.c`、`Kconfig`）
+
+## 解决的问题
+
+M4 内存回归的失败点在 vela_tls.c 的 tls_write_request：请求体（约
+12.5 KB）已序列化进静态缓冲后，紧接着的 4 KB 头部 malloc 是整条请求
+链上最紧的堆点（2026-11-08 的 8/8 失败都是这个 malloc 返回 -5）。
+但 2026-11-12 之前的固件在该点没有任何读数，只能靠 heap_info 在
+推包前后取数，看不到轮内瞬间。本补丁在写请求前打一行堆水位。
+
+## 解法
+
+`tls_write_request` 入口处调用 `sloop_memprobe_peak(body_len)`：
+用 `mallinfo()`（只读 mm 统计，自身零分配）打一行
+`[sloop-memprobe] peak pre-write req=<body> maxfree=<最大空闲块>
+free=<总空闲>`。用宏对（`SLOOP_MEMPROBE`）包住，配
+`CONFIG_SILOOP_MEMPROBE`（bool，默认 y）开关；关闭时编译为空。
+选这个点的原因：它是 M4 回归的精确失败位置（0026 注释里的
+`maxfree=3944` 就是在这里测到的），且每次 LLM 请求必经。
+
+## 局限
+
+- 打点在请求体序列化之后、头部分配之前——是"峰值路径边界"，
+  不是堆最低点的冻结现场；但 M4 的失败恰在该点之后第一次分配，
+  所以边界读数与失败原因直接相关。
+- mallinfo 读数在高水位下与真实最大空闲块一致（NuttX mm 统计
+  同步更新），无额外误差来源。
+
+## 验证记录
+
+- 干净副本全链（0007…0024 + 0025 + 0026 + 0027 + 0030 + 0031 +
+  0032 + 0033）`git apply` 后与工作树 diff 为 0（2026-11-25，
+  /tmp 重放，applied=23/23）。
+- 板测：2026-11-12 起 `sloop-memprobe` 行随每轮 LLM 请求出现，
+  `maxfree=3944` 读数定位了 2026-11-08 失败链的最后一环
+  （见 0026 注释与 cc-report-1124-fail.md）。
+
+---
+
+# 0026-ai-agent-tls-header-stack-buf.patch
+
+## 性质：内存修复（删一次 4 KB 堆分配），带完整尺寸推导注释
+
+## 目标仓库
+
+`packages/ai_agent`（`src/infra/vela_tls.c` tls_write_request）
+
+## 解决的问题
+
+请求头部缓冲 `malloc(4096)` 是 2026-11-08 八轮全败失败链的最后一环：
+峰值点堆底（memprobe 实测 maxfree 低至 3,944 B）容不下这个分配。
+分配失败即整轮 LLM 请求失败（`Write request failed: -5`）。
+
+## 根因
+
+头部缓冲用堆分配的理由（调用线程栈有限）与实际尺寸不匹配：审计
+全部调用方的头部集合后，最坏情况是 668 字节（MCP 路径），LLM 路径
+639 字节，板上实测约 300 字节。为最坏 668 字节的需求占 4 KB 堆，
+且这 4 KB 恰好压在堆最紧的点上。
+
+## 解法
+
+头部缓冲改栈上 `char hdr[768]`（`TLS_HDR_STACK_BUF`）：栈分配不会
+失败——线程没有这块栈就根本跑不到这里。HDR_APPEND 宏改用
+`sizeof(hdr)`，溢出契约不变（同样返回 VELA_TLS_ERR_OVERFLOW），
+删掉 3 处 free。补丁内注释完整记录：逐调用方头部尺寸推导
+（LLM 639 / MCP 668 / fetch_url 由路径缓冲主导）、已知收窄
+（fetch_url 的超长 URL 阈值从 4096 降到约 600，真实 URL 远低于此，
+失败模式不变）、调用线程栈预算（agent_loop 32 KB，链上已有局部
+约 1.1 KB，768 字节在预算内）。
+
+## 局限
+
+- fetch_url 传入超长 URL（>约 600 字节切片）会从"成功"变为
+  "OVERFLOW 失败"；真实 URL 远低于此，工具报错、轮次继续，
+  失败模式与原来一致。
+- 768 是审计得出的静态上限；未来新增调用方若头部更大，需按
+  注释里的推导方法重新核算并调大。
+
+## 验证记录
+
+- 干净副本全链重放与工作树一致（2026-11-25，applied=23/23）。
+- 编译验证随 B1/B2 重建（本批次执行）；板测随下次固件烧录。
+- 2026-11-12 板测（含本补丁前身源码的固件）：memprobe 在该点
+  读到 maxfree=3944，证实失败链最后一环的定位。
+
+---
+
+# 0027-ai-agent-tls-pool-release.patch
+
+## 性质：内存修复（轮末释放空闲池化 TLS 连接）
+
+## 目标仓库
+
+`packages/ai_agent`（`src/infra/vela_tls.c` + `src/infra/vela_tls.h`）
+
+## 解决的问题
+
+池化 TLS 连接每条钉住约 35–40 KB 堆（两条 16.4 KB mbedtls 收发
+缓冲 + 会话 + 对端证书）。心跳 120 s 间隔远大于连接 30 s 保质期，
+所以跨轮永远不会复用——它只是把堆钉住到下一轮 acquire 把它逐出、
+再立即重新握手。下一轮因此从 32 KB 守卫线以下起步。
+
+## 解法
+
+新增 `vela_tls_pool_release_idle()`：释放池内所有未在使用的连接，
+在每轮结束（agent_loop 轮尾，0032 引入调用）执行。握手次数不变
+（下一轮无论如何都要重连），只是把内存提前 120 s 还给堆。
+vela_tls.h 加声明；实现放在 s_pool 解锁与 tls_ctx_connect 之间。
+
+## 局限
+
+- 2026-11-08 的写失败发生在轮内（不是跨轮），由 0026 的栈上头部
+  缓冲解决；本补丁解决的是"下一轮从低水位起步"。
+- 若未来心跳周期缩短到与连接保质期同量级，跨轮复用会变成现实，
+  本补丁的收益假设需重估。
+
+## 验证记录
+
+- 干净副本全链重放与工作树一致（2026-11-25，applied=23/23）。
+- **0032 依赖本补丁**：agent_loop.c 的轮尾调用
+  `vela_tls_pool_release_idle()`，实现在本补丁。B1 重建（只有
+  0007…0024 + 0030…0032、缺本补丁）应当链接失败，见
+  cc-report-1125-techdebt-b2.md §B1。
+
+---
+
+# 0028-apps-mbedtls-out-content-clamp.patch
+
+## 性质：内存修复（mbedTLS 发送记录上限钳制到 4 KB），改 apps
+
+## 目标仓库
+
+`apps`（`crypto/mbedtls/include/mbedtls/mbedtls_config.h`）
+
+## 解决的问题
+
+每个 SSL 上下文钉住约 16.4 KB 的发送缓冲（OUT_CONTENT_LEN=16384）。
+2026-11-16 r2 iter-4 在堆只剩个位数 KB 时握手失败：握手期 RSA/
+BIGNUM 临时分配（约 2–4 KB）拿不到内存（ssl_handshake -0x4290）。
+堆底约束才是本板的瓶颈，不是记录大小。
+
+## 解法
+
+`MBEDTLS_SSL_OUT_CONTENT_LEN` 钳制：Kconfig 值 >4096 时编译为
+4096。超过单条记录的请求由 mbedtls_ssl_write 自动分片为 4 KB
+记录，vela_tls.c 的写循环本来就累积部分写（ret > 0），语义不变。
+IN 保持 16384（TLS 规范要求）。Kconfig 符号不动（.config /
+defconfig 无需修改），≤4096 的配置值仍被尊重。
+
+## 局限
+
+- 分片写增加系统调用往返（16 KB 请求从 1 条记录变 4 条），
+  对 120 s 一次的心跳请求无感知影响。
+- 若未来出现"必须单记录发送"的对端要求（如精确 Content-Length
+  分界），需要重新评估；当前对端（MiMo 网关）为标准 HTTP/TLS。
+
+## 验证记录
+
+- 导出后干净副本（apps 基线 dcc6a95c3 + 0003 + 0028）
+  `git apply` 后与工作树 `diff -r` 一致（2026-11-25，/tmp/appschain）。
+- 编译验证随 B1/B2 重建；板测随下次固件烧录。
+
+---
+
+# 0033-ai-agent-registry-guard-misc.patch
+
+## 性质：守卫补全 + 清理（tech-debt 批 2 导出）
+
+## 目标仓库
+
+`packages/ai_agent`（`src/tools/tool_guard.c`、`src/tools/tool_registry.h`）
+
+## 解决的问题
+
+两处已在工作树长期存在但从未导出的改动（tech-debt 盘点 #5、#6）：
+
+1. **#5 守卫补全**：tool_guard.c 的 s_sec_table 缺 recover_task 行。
+   0017 设计里 recover_task 是敏感工具（限频表按敏感工具计数），
+   但表里漏了它——tool_guard_check 的限频只对
+   `get_security_level(name) == TOOL_SEC_SENSITIVE` 的工具生效，
+   漏行意味着 recover_task 不受限频约束。补上
+   `{ "recover_task", TOOL_SEC_SENSITIVE }`。
+2. **#6 删宏**：tool_registry.h 里 0017 时代的
+   `#define TOOL_SEC_SENSITIVE 0x01u` 与 tool_guard.h 的枚举
+   `TOOL_SEC_SENSITIVE` 同名冲突。A5 核对证实：同一编译单元先见
+   宏后见枚举时是硬编译错误（`expected identifier before numeric
+   constant`）；当前能编译过只是因为 include 顺序恰好让枚举先
+   定义。宏删除后 registry.c:435 的 REGISTER_TOOL_FLAGS 实参
+   解析为 tool_guard.h 的枚举值（=2）。
+
+## #6 的语义影响核对（G1 结论）
+
+`agent_tool_t.flags` 字段：注册宏写入一次后，**全代码库无任何读取
+点**（grep `.flags` / `->flags` 仅命中定义与注册宏；判定"敏感"的
+唯一路径是 tool_guard.c 自己的 s_sec_table 按名字查表，枚举比较
+`level == TOOL_SEC_SENSITIVE`，与 registry 的 flags 字段无关）。
+因此删宏后 flags 字段存的值从 0x01 变为 2 属于**死数据变化**，
+无行为影响；"0x02 位"也未被任何代码使用。限频、守卫、处置路径
+全部经 s_sec_table（本补丁第 1 项把 recover_task 补进表里）。
+
+## 与 #7 的关系（盘点勘误）
+
+tech-debt 盘点初稿把 CMakeLists.txt +2（tool_recover.c/
+hotfix_exports.c）与 .gitignore +1（agent_secrets.h 行）也列为
+未导出（#7）。批 2 重放证实：CMake 半边已在 0022、.gitignore 半边
+已在 0010，两者均已导出，#7 不存在，本补丁只含 #5 + #6。
+
+## 局限
+
+- flags 字段本身是上游遗留的死字段；本补丁不删除字段（避免
+  触碰上游结构），只在补丁说明里记录其语义。
+- s_sec_table 与 s_sensitive_names（限频索引表）是两张表；
+  recover_task 需同时在后者中（0017 已有），本补丁不动。
+
+## 验证记录
+
+- 干净副本全链重放与工作树一致（2026-11-25，applied=23/23；
+  /tmp/g33check 单独证实 #7 两半边已在 0022/0010 中）。
+- 编译验证随 B1/B2 重建（本批次执行）；板测随下次固件烧录。
 
 ---
 

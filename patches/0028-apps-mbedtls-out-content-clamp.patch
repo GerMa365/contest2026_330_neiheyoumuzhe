@@ -1,0 +1,28 @@
+diff --git a/crypto/mbedtls/include/mbedtls/mbedtls_config.h b/crypto/mbedtls/include/mbedtls/mbedtls_config.h
+index 8ffd60a65..ac7bf7e7d 100644
+--- a/crypto/mbedtls/include/mbedtls/mbedtls_config.h
++++ b/crypto/mbedtls/include/mbedtls/mbedtls_config.h
+@@ -4503,8 +4503,23 @@
+  * Uncomment to set the maximum plaintext size of the outgoing I/O buffer.
+  */
+ #ifdef CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN
++#if CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN > 4096
++/* SiliconLoop: clamp the outgoing TLS record to 4 KB. The binding
++ * constraint on this board is the heap floor, not the record size:
++ * each SSL context pins a ~16.4 KB out_buf, and once a round's free
++ * heap falls to single-digit KB the handshake-time RSA/BIGNUM
++ * temporary (~2-4 KB) fails (2026-11-16 r2 iter-4, ssl_handshake
++ * -0x4290 BIGNUM alloc). Requests larger than one record are
++ * fragmented by mbedtls_ssl_write into 4 KB records; the vela_tls.c
++ * write loops already accumulate partial writes (ret > 0). IN stays
++ * 16384 as the TLS spec requires. The Kconfig symbol is left at
++ * 16384 so .config/defconfig need no change; values <= 4096 there
++ * are still honored. */
++#define MBEDTLS_SSL_OUT_CONTENT_LEN  4096
++#else
+ #define MBEDTLS_SSL_OUT_CONTENT_LEN  CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN
+ #endif
++#endif
+ 
+ /** \def MBEDTLS_SSL_DTLS_MAX_BUFFERING
+  *

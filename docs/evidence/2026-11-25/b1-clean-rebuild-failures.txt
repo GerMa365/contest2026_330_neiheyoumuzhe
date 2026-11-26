@@ -1,0 +1,8 @@
+CC:  netlib_setmtu.c make[2]: *** [/tmp/rb-b1/apps/Application.mk:273：src/core/agent_loop.c.tmp.rb-b1.packages.ai_agent.o] 错误 1
+chip/esp-hal-3rdparty/components/spi_flash/esp_flash_api.c:1124:5: note: in expansion of macro 'CHECK_WRITE_ADDRESS'
+chip/esp-hal-3rdparty/components/spi_flash/esp_flash_api.c:1364:5: note: in expansion of macro 'CHECK_WRITE_ADDRESS'
+make[1]: *** [Makefile:53：/tmp/rb-b1/apps/packages/ai_agent_all] 错误 2
+make: *** [tools/LibTargets.mk:248：/tmp/rb-b1/apps/libapps.a] 错误 2
+src/core/agent_loop.c:1808:9: warning: implicit declaration of function 'vela_tls_pool_release_idle'; did you mean 'vela_tls_pool_cleanup'? [-Wimplicit-function-declaration]
+/tmp/rb-b1/packages/ai_agent/src/tools/tool_guard.h:30:5: note: in expansion of macro 'TOOL_SEC_SENSITIVE'
+/tmp/rb-b1/packages/ai_agent/src/tools/tool_registry.h:35:28: error: expected identifier before numeric constant

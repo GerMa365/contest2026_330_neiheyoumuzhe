@@ -1,0 +1,25 @@
+--- a/src/tools/tool_guard.c
++++ b/src/tools/tool_guard.c
+@@ -38,6 +38,7 @@
+ 
+ static const tool_sec_entry_t s_sec_table[] = {
+     { "run_shell",  TOOL_SEC_SENSITIVE },
++    { "recover_task", TOOL_SEC_SENSITIVE },
+     { "write_file", TOOL_SEC_SENSITIVE },
+     { "edit_file",  TOOL_SEC_SENSITIVE },
+     { "vibrate",    TOOL_SEC_MODERATE  },
+
+--- a/src/tools/tool_registry.h
++++ b/src/tools/tool_registry.h
+@@ -29,11 +29,6 @@
+ extern "C" {
+ #endif
+ 
+-/* Tool security level: TOOL_SEC_SENSITIVE marks execution-plane tools
+- * that act on real tasks/files. Their execute() must validate strictly
+- * (recover_task keeps whitelist + cooldown + re-sample guards in C). */
+-#define TOOL_SEC_SENSITIVE 0x01u
+-
+ typedef struct {
+     const char* name;
+     const char* description;

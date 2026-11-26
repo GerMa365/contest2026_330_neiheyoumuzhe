@@ -1,0 +1,114 @@
+--- a/src/infra/vela_tls.c
++++ b/src/infra/vela_tls.c
+@@ -467,6 +467,14 @@
+     } while (0)
+ #endif
+ 
++/* SiliconLoop: stack buffer for HTTP request headers in
++ * tls_write_request (see the size-derivation comment there).
++ * 768 bytes covers the worst-case header set of every caller in this
++ * codebase (LLM path audited at 639 bytes, MCP at 668; see the
++ * derivation below) with the HDR_APPEND overflow check kept as the
++ * same VELA_TLS_ERR_OVERFLOW guard as before. */
++#define TLS_HDR_STACK_BUF 768
++
+ static int tls_write_request(tls_ctx_t* ctx,
+     const char* method, const char* host,
+     const char* path,
+@@ -478,22 +486,67 @@
+      * allocation here — mallinfo() only reads mm statistics. */
+     SLOOP_MEMPROBE(body_len);
+ 
+-    /* Heap-allocate header buffer to reduce stack pressure.
+-     * This function is called from threads with limited stack
+-     * (outbound dispatch 16KB) and the TLS context already
+-     * consumes significant stack space. */
+-    char* hdr = malloc(4096);
+-    if (!hdr)
+-        return VELA_TLS_ERR_OVERFLOW;
++    /* SiliconLoop: the header buffer lives on the calling thread's
++     * stack instead of the heap.  The 4KB malloc here was the last
++     * link of the 2026-11-08 failure chain - at the request-write
++     * peak (12KB request body serialized in a static buffer, TLS
++     * in/out buffers already allocated) the heap bottomed out low
++     * enough for this allocation to fail (memprobe on 2026-11-12
++     * measured maxfree as low as 3,944 bytes at exactly this point,
++     * inside an in-round reconnect), and the 2026-11-08 runs failed
++     * here with this malloc returning -5 (VELA_TLS_ERR_OVERFLOW,
++     * "Write request failed: -5", 8/8 rounds at iter-0).  A stack
++     * buffer cannot fail: the thread must have the stack or it could
++     * not be running at all.
++     *
++     * Size derivation (TLS_HDR_STACK_BUF = 768): every caller's
++     * header set was audited.  LLM path (llm_proxy.c, the only caller
++     * on the heartbeat round): request line 143 (method + path[128]
++     * from llm_router) + Host 135 (host[128]) + Connection 24 +
++     * User-Agent 28 + Content-Length 38 + Content-Type 32 (merged by
++     * vela_https_post_json) + Authorization 151 ("Bearer " + key
++     * from api_key[128]) + X-Model-Provider-Id 86 (provider prefix
++     * of model[64]) + terminator 2 = 639.  MCP path (mcp_client.c,
++     * not compiled in this config): adds Accept 47 + Connection:
++     * close 20 + Mcp-Session 138 (session_id[128]) = 668.  GET-only
++     * tools are dominated by their path buffer (web_search path[512]
++     * = 575 total).  Observed maximum on board logs is ~300 (LLM,
++     * key ~= 90 bytes).  768 therefore has >=100 bytes of margin over
++     * the audited worst case; HDR_APPEND still returns
++     * VELA_TLS_ERR_OVERFLOW on overflow, the same contract the 4KB
++     * buffer had.
++     *
++     * Known narrowing: tool_fetch_url passes a path sliced from the
++     * URL in its tool input (bounded only by AGENT_TOOL_MAX_INPUT_LEN
++     * = 32KB).  Such requests already had to fit 4096 to succeed;
++     * with 768 the threshold drops.  A pathological fetch_url URL
++     * longer than ~600 bytes will now fail with OVERFLOW where it
++     * previously succeeded; real URLs are far below this and the
++     * failure mode (tool reports error, round continues) is
++     * unchanged.
++     *
++     * Stack budget of the calling threads: agent_loop (32KB stack,
++     * CONFIG_EXAMPLES_AI_AGENT_VELA_STACKSIZE) on the LLM path - the
++     * same call chain already holds ~776 bytes of locals in
++     * llm_http_direct (api_key/llm_host/llm_path/auth_header/
++     * provider buffers) plus ~320 in llm_chat_tools, and the 4KB
++     * header used to be heap because of it; the outbound dispatch
++     * (16KB, AGENT_OUTBOUND_STACK) and 16KB tool-exec threads only
++     * reach here via non-LLM tools whose locals are smaller.
++     * Putting 768 on the stack of a chain already carrying ~1.1KB of
++     * locals is within every caller's budget; the former comment's
++     * "threads with limited stack" concern is met by sizing the
++     * buffer to audited header length instead of 4KB of heap.
++     */
++    char hdr[TLS_HDR_STACK_BUF];
+ 
+     int pos = 0;
+     int ret;
+ 
+-#define HDR_APPEND(fmt, ...)                                    \
+-    pos += snprintf(hdr + pos, 4096 - pos, fmt, ##__VA_ARGS__); \
+-    if (pos >= 4096) {                                          \
+-        free(hdr);                                              \
+-        return VELA_TLS_ERR_OVERFLOW;                           \
++#define HDR_APPEND(fmt, ...)                                                \
++    pos += snprintf(hdr + pos, sizeof(hdr) - (size_t)pos, fmt, ##__VA_ARGS__); \
++    if (pos >= (int)sizeof(hdr)) {                                          \
++        return VELA_TLS_ERR_OVERFLOW;                                       \
+     }
+ 
+     HDR_APPEND("%s %s HTTP/1.1\r\n", method, path);
+@@ -523,16 +576,12 @@
+         if (ret > 0) {
+             written += ret;
+         } else if (ret == 0) {
+-            free(hdr);
+             return VELA_TLS_ERR_WRITE;
+         } else if (ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+-            free(hdr);
+             return VELA_TLS_ERR_WRITE;
+         }
+     }
+ 
+-    free(hdr);
+-
+     /* Write body */
+     if (body && body_len > 0) {
+         size_t bw = 0;
